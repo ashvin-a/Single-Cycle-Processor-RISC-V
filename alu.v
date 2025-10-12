@@ -86,3 +86,34 @@ assign o_result =       (i_opsel == 3'b000)? ((i_sub) ? (i_op1 - i_op2) : (i_op1
 endmodule
 
 `default_nettype wire
+
+
+module alu_control( input  wire [1:0]  i_clu_alu_op,
+                    input  wire [31:0] i_instr_mem_inst,
+                    output wire [3:0]  o_alu_control);
+
+assign op_code = i_instr_mem_inst[6:0]
+assign decode = (op_code == 7'b0110011) ? 4'b0000: // R type
+              (op_code == 7'b0010011) ? 4'b0001: // I type
+              (op_code == 7'b0110111) ? 4'b0010: // LUI
+              (op_code == 7'b0010111) ? 4'b0011: // AUIPC Where the hell do we even use this?
+              (op_code == 7'b0000011) ? 4'b0100: // LOAD
+              (op_code == 7'b0100011) ? 4'b0101: // STORE
+              (op_code == 7'b1100011) ? 4'b0110: // BRANCH
+              (op_code == 7'b1100111) ? 4'b0111: // JALR
+              (op_code == 7'b1101111) ? 4'b1000; // JAL
+
+
+              
+
+assign o_alu_control =  (i_clu_alu_op == 2'b0 ) ? (4'b0000) : //Forced Addition
+                        (i_clu_alu_op == 2'b01 ) ? (4'b0001): //Forced Subtraction
+                        (i_clu_alu_op == 2'b10 ) ? // Might be an R type or I type
+                        // Check for R type
+                        // TODO: Complete this!!
+                        (deco == 4'b0000) ? ()
+                        // Check for I type
+                        (deco == 4'b0000) 
+                        (i_clu_alu_op == 2'b11 )
+
+endmodule
