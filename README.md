@@ -36,3 +36,5 @@ And before pushing, I'd suggest you to run this command
 And btw, DO NOT PUSH TO MAIN! (Coding Standards).
 
 If you have ANY DOUBTS, pleeeease call meeee!!!! 🫡
+
+A helpful resource that I personally found useful : [Link](https://www.youtube.com/playlist?list=PL4cUxeGkcC9goXbgTDQ0n_4TBzOO0ocPR)
