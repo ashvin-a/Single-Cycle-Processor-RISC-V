@@ -20,21 +20,17 @@ module alu (
     // 3'b110: or
     // 3'b111: and
     input  wire [ 2:0] i_opsel,
-
     // When asserted, addition operations should subtract instead.
     // This is only used for `i_opsel == 3'b000` (addition/subtraction).
     input  wire        i_sub,
-
     // When asserted, comparison operations should be treated as unsigned.
     // This is only used for branch comparisons and set less than.
     // For branch operations, the ALU result is not used, only the comparison
     // results.
     input  wire        i_unsigned,
-
     // When asserted, right shifts should be treated as arithmetic instead of
     // logical. This is only used for `i_opsel == 3'b011` (shift right).
     input  wire        i_arith,
-
     // First 32-bit input operand.
     input  wire [31:0] i_op1,
     // Second 32-bit input operand.
@@ -42,47 +38,101 @@ module alu (
     // 32-bit output result. Any carry out (from addition) should be ignored.
     output wire [31:0] o_result,
     // Equality result. This is used downstream to determine if a
-    // branch should be taken.
+    // branch should be taken. // BEQ
     output wire        o_eq,
     // Set less than result. This is used downstream to determine if a
     // branch should be taken.
-    output wire        o_slt
+    output wire        o_slt, // BLT and BLTU
+   // Set Not Equal result. This is used downstream to determine if a
+    // branch should be taken.
+    output wire        o_sne,  // BNE
+   // Set Greater than result. This is used downstream to determine if a
+    // branch should be taken.
+    output wire        o_sge  // BGE and BGEU
+
 );
 
-///////////////////////////////////////////
-/////////////////Queries///////////////////    
-///////////////////////////////////////////
-//For shift left and shift right (arithmetic as well as logical) for a 2 input ALU , which input will be the immediate value??
-//Logical shift has no sign awareness where as Arithmetic shift has - more evident in case of right shift where we will have to
-// extend by sign bit if it is a signed number.
-//What if op1<op2? in case of subtract?
-//How do I know whether an operand is signed or unsigned?
-//If you use a signed instruction (slt, blt, div), 
-//the hardware interprets operands as two’s complement signed integers.
-//If you use an unsigned instruction (sltu, bltu, divu), the hardware interprets them as unsigned integers.
-//what is the default value for slt x or 0? - I am setting as X as 0 gives a wrong information.
-//What is the default operation expected?
-//What is the o_result expectation when we check for slt and sltu?
+    wire [4:0]temp = i_op2[4:0];
+    wire [31:0] sll = i_op1 << temp;
+    wire [31:0] srl = i_op1 >> temp;
+    wire [31:0] sra = $signed(i_op1) >>> temp;
+    wire [31:0] slt_signed = ($signed(i_op1) < $signed(i_op2)) ? 32'b1 : 32'b0;
+    wire [31:0] slt_unsigned = (i_op1 < i_op2) ? 32'b1 : 32'b0;
 
-   wire [4:0]temp = i_op2[4:0];
-   wire [31:0] sll = i_op1 << temp;
-   wire [31:0] srl = i_op1 >> temp;
-   wire [31:0] sra = $signed(i_op1) >>> temp;
-   wire [31:0] slt_signed = ($signed(i_op1) < $signed(i_op2)) ? 32'b1 : 32'b0;
-   wire [31:0] slt_unsigned = (i_op1 < i_op2) ? 32'b1 : 32'b0;
+    assign o_eq  = (i_op1 == i_op2);
+    assign o_slt =  i_unsigned ? (i_op1 <  i_op2) : ($signed(i_op1) <  $signed(i_op2));
+    assign o_sne =  i_unsigned ? (i_op1 != i_op2) : ($signed(i_op1) != $signed(i_op2));
+    assign o_sge =  i_unsigned ? (i_op1 >= i_op2) : ($signed(i_op1) >= $signed(i_op2));
+    assign o_result =       (i_opsel == 3'b000)? ((i_sub) ? (i_op1 - i_op2) : (i_op1 + i_op2)) :
+                            (i_opsel == 3'b001)? (i_op1 << temp) : 
+                            ((i_opsel == 3'b010) || (i_opsel == 3'b011)) ? (i_unsigned ? slt_unsigned : slt_signed) : 
+                            (i_opsel == 3'b100)? (i_op1 ^ i_op2) :  
+                            (i_opsel == 3'b101)? ((i_arith)? sra : srl) : 
+                            (i_opsel == 3'b110)? (i_op1 | i_op2) : 
+                            (i_opsel == 3'b111)? (i_op1 & i_op2) : 
+                            32'h0;
 
+endmodule
+// ADD LOAD and BNE - priority for now.
+module alu_wrapper (
+    // 4 bit input from ALU Control block
+    input  wire [ 3:0] i_alu_ctrl_opsel,
+    // First 32-bit input operand.
+    input  wire [31:0] i_rf_op1,
+    // Second 32-bit input operand.
+    input  wire [31:0] i_rf_op2,
+    //Aluctrl unsigned chk input.
+    input wire i_aluctrl_unsigned,
+    // 32-bit output result. Any carry out (from addition) should be ignored.
+    output wire [31:0] o_alu_result,
+    // Equality result. This is used downstream to determine if a
+    // branch should be taken. (case of BLT/U , BGE/U , BNE , BEQ)
+    output wire        o_alu_Zero
+);
+    wire [ 2:0] i_opsel;
+    wire        i_sub;
+    wire        i_unsigned;
+    wire        i_arith;
+    wire        o_eq;
+    wire        o_slt;  // BLT and BLTU
+    wire        o_sne;  // BNE
+    wire        o_sge;  // BGE and BGEU
+    alu alu_inst(
+        .i_opsel(i_opsel),
+        .i_sub(i_sub),
+        .i_unsigned(i_aluctrl_unsigned),
+        .i_arith(i_arith),
+        .i_op1(i_rf_op1),
+        .i_op2(i_rf_op2),
+        .o_result(o_alu_result),
+        .o_eq(o_eq),
+        .o_slt(o_slt),
+        .o_sne(o_sne),
+        .o_sge(o_sge)
+    );
+    ////////////////////////////////////////////
+    //////////INPUTS TO THE INSIDE ALU//////////
+    ////////////////////////////////////////////
+    //assign i_unsigned = (i_alu_ctrl_opsel == 4'b1001)? 1'b1 : 1'b0;
 
-assign o_eq  = (i_op1 == i_op2);
-assign o_slt =  i_unsigned ? (i_op1 < i_op2) : ($signed(i_op1) < $signed(i_op2)); 
-assign o_result =       (i_opsel == 3'b000)? ((i_sub) ? (i_op1 - i_op2) : (i_op1 + i_op2)) :
-                        (i_opsel == 3'b001)? (i_op1 << temp) : 
-                        ((i_opsel == 3'b010) || (i_opsel == 3'b011)) ? (i_unsigned ? slt_unsigned : slt_signed) : 
-                        (i_opsel == 3'b100)? (i_op1 ^ i_op2) :  
-                        (i_opsel == 3'b101)? ((i_arith)? sra : srl) : 
-                        (i_opsel == 3'b110)? (i_op1 | i_op2) : 
-                        (i_opsel == 3'b111)? (i_op1 & i_op2) : 
-                        32'h0;
-
+    assign i_arith    = (i_alu_ctrl_opsel == 4'b0111)? 1'b1 : 1'b0;
+    assign i_sub      = (i_alu_ctrl_opsel == 4'b0001)? 1'b1 : 1'b0;
+    assign i_opsel    = (i_alu_ctrl_opsel == 4'b0000)? 3'b000 :    //ADD
+                        (i_alu_ctrl_opsel == 4'b0001)? 3'b000 :    //SUB   
+                        (i_alu_ctrl_opsel == 4'b0010)? 3'b111 :    //AND   
+                        (i_alu_ctrl_opsel == 4'b0011)? 3'b110 :    //OR   
+                        (i_alu_ctrl_opsel == 4'b0100)? 3'b100 :    //XOR   
+                        (i_alu_ctrl_opsel == 4'b0101)? 3'b001 :    //SLL   
+                        (i_alu_ctrl_opsel == 4'b0110)? 3'b101 :    //SRL   
+                        (i_alu_ctrl_opsel == 4'b0111)? 3'b101 :    //SRA   
+                        (i_alu_ctrl_opsel == 4'b1000)? 3'b010 :    //SLT   - 010 and 011
+                        (i_alu_ctrl_opsel == 4'b1001)? 3'b010 :    //SLTU   
+                        (i_alu_ctrl_opsel == 4'b1010)? 3'b011 :    //PASS_B - LUI   - Can I use 011 for LUI?
+                        3'bXXX; //Don't care                               
+    ////////////////////////////////////////////
+    /////////////////OUTPUTS////////////////////
+    ////////////////////////////////////////////
+    assign o_alu_Zero  = o_eq | o_slt | o_sne | o_sge ; 
 endmodule
 
 `default_nettype wire
