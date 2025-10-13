@@ -102,7 +102,7 @@ wire [6:0] funct7;
 assign funct3 = i_instr_mem_inst[14:12];
 assign funct7 = i_instr_mem_inst[31:25];
 assign op_code = i_instr_mem_inst[6:0];
-assign o_unsigned = ((funct3 == 3'b011) || 
+assign o_unsigned = (((funct3 == 3'b011) && ((op_code == 7'b0110011) || (op_code == 7'0010011))) || 
                     ((op_code == 7'b0000011) && (funct3 == 3'b100 || funct3 == 3'b101)) ||
                     ((op_code == 7'b1100011) && (funct3 == 3'b110 || funct3 == 3'b111))) ?
                     1'b1: 1'b0; // Sets to 1 if its unsigned
@@ -121,9 +121,9 @@ assign decode = (op_code == 7'b0110011) ? 4'b0000: // R type
 // wire [] I dont remember why i put this here !
 
 assign o_alu_control =  (i_clu_alu_op == 2'b00 ) ? //Forced Addition (S, U, J)
-                            (4'b0000)
+                            (4'b0000):
                         (i_clu_alu_op == 2'b01 ) ? // Forced Subtraction (B)
-                            (4'b0001)
+                            (4'b0001):
                         (i_clu_alu_op == 2'b10 ) ? // Might be an R type or I type
 
                             // Check for R type
