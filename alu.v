@@ -136,3 +136,96 @@ module alu_wrapper (
 endmodule
 
 `default_nettype wire
+
+
+module alu_control( input  wire [1:0]  i_clu_alu_op,
+                    input  wire [31:0] i_instr_mem_inst,
+                    output wire o_unsigned,
+                    output wire [3:0]  o_alu_control
+                    );
+
+wire [5:0] op_code;
+wire [3:0] decode;
+wire [2:0] funct3;
+wire [6:0] funct7;
+
+assign funct3 = i_instr_mem_inst[14:12];
+assign funct7 = i_instr_mem_inst[31:25];
+assign op_code = i_instr_mem_inst[6:0];
+assign o_unsigned = (((funct3 == 3'b011) && ((op_code == 7'b0110011) || (op_code == 7'0010011))) || 
+                    ((op_code == 7'b0000011) && (funct3 == 3'b100 || funct3 == 3'b101)) ||
+                    ((op_code == 7'b1100011) && (funct3 == 3'b110 || funct3 == 3'b111))) ?
+                    1'b1: 1'b0; // Sets to 1 if its unsigned
+
+assign decode = (op_code == 7'b0110011) ? 4'b0000: // R type
+              (op_code == 7'b0010011) ? 4'b0001: // I type
+              (op_code == 7'b0110111) ? 4'b0010: // LUI
+              (op_code == 7'b0010111) ? 4'b0011: // AUIPC
+              (op_code == 7'b0000011) ? 4'b0100: // LOAD
+              (op_code == 7'b0100011) ? 4'b0101: // STORE
+              (op_code == 7'b1100011) ? 4'b0110: // BRANCH
+              (op_code == 7'b1100111) ? 4'b0111: // JALR
+              (op_code == 7'b1101111) ? 4'b1000; // JAL
+
+
+// wire [] I dont remember why i put this here !
+
+assign o_alu_control =  (i_clu_alu_op == 2'b00 ) ? //Forced Addition (S, U, J)
+                            (4'b0000):
+                        (i_clu_alu_op == 2'b01 ) ? // Forced Subtraction (B)
+                            (4'b0001):
+                        (i_clu_alu_op == 2'b10 ) ? // Might be an R type or I type
+
+                            // Check for R type
+                            (decode == 4'b0000) ? 
+                                (funct3 == 3'b000) ?
+                                    (funct7[5] == 1'b1) ?
+                                        (4'b0000): // add
+                                    (4'b0001): // sub
+                                (funct3 == 3'b001) ?
+                                    (4'b0101): // sll
+                                (funct3 == 3'b010) ?
+                                    (4'b1000): // slt
+                                (funct3 == 3'b011) ?
+                                    (4'b1001): // sltu
+                                (funct3 == 3'b100) ?
+                                    (4'b0100): // xor 
+                                (funct3 == 3'b101) ?
+                                    (funct7[5] == 1'b1) ?
+                                        (4'b0110): // srl
+                                    (4'b0111): // sra
+                                (funct3 == 3'b110) ?
+                                    (4'0011): // or 
+                                (funct3 == 3'b111) ?
+                                    (4'0010): // xor 
+
+                            // Check for I type
+                            (decode == 4'b0001) ?
+                                (funct3 == 3'b000) ?
+                                    (funct7[5] == 1'b1) ?
+                                        (4'b0000): // addi
+                                (funct3 == 3'b001) ?
+                                    (4'b0101): // slli
+                                (funct3 == 3'b010) ?
+                                    (4'b1000): // slti
+                                (funct3 == 3'b011) ?
+                                    (4'b1001): // sltiu
+                                (funct3 == 3'b100) ?
+                                    (4'0100): // xori
+                                (funct3 == 3'b101) ?
+                                    (funct7[5] == 1'b1) ?
+                                        (4'b0110): // srli
+                                    (4'b0111): // srai
+                                (funct3 == 3'b110) ?
+                                    (4'b0011): // ori 
+                                (funct3 == 3'b111) ?
+                                    (4'b0010): // xori 
+                            
+                            // Load operations
+                            (decode == 4'b0100) ?
+                                (4'b0000): // Add. Intuition - The load operation involves adding.
+
+                        (i_clu_alu_op == 2'b11 ) ? // Return invalid
+                        (4'bXXXX);
+
+endmodule
