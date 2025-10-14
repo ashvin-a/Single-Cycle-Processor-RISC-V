@@ -4,14 +4,14 @@ module fetch (
     input  wire clk,
     input  wire rst_n,
     input  wire i_clu_branch,
-    input  wire i_alu_o_slt,
+    input  wire i_alu_o_Zero,
     input  wire [31:0]i_imm_o_immediate,
     output wire [31:0]o_instr_mem_rd_addr // read address is 32 bits and not 5 bits
 );
     reg [31:0] PC;
-    reg [31:0]pc_imm_mux_val;
+    wire [31:0]pc_imm_mux_val;
     ///[Q] : Should it be o_slt or o_eq?
-    assign pc_imm_mux_val = (i_clu_branch & i_alu_o_slt)? (PC + {{i_imm_o_immediate[31:1],1'b0}}) : (PC + 4) ; 
+    assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? (PC + {{i_imm_o_immediate[31:1],1'b0}}) : (PC + 4) ; 
     assign o_instr_mem_rd_addr = PC;
     //[Q1] : What Value to be initialized for PC?
     always @(posedge clk or negedge rst_n) begin
@@ -34,14 +34,10 @@ module control_unit(
     output wire o_clu_ALUOp,
     output wire o_clu_MemWrite,
     output wire o_clu_ALUSrc,
-    output wire o_clu_RegWrite
+    output wire o_clu_RegWrite,
+    output wire o_clu_dmem_mask
 );
 
-endmodule
-
-module alu_control(input  wire [1:0]  i_clu_alu_op,
-                   input  wire [31:0] i_instr_mem_inst,
-                   output wire [3:0]  o_alu_control);
 endmodule
 
 // The arithmetic logic unit (ALU) is responsible for performing the core
@@ -125,6 +121,8 @@ module alu_wrapper (
     input  wire [31:0] i_rf_op1,
     // Second 32-bit input operand.
     input  wire [31:0] i_rf_op2,
+    //Aluctrl unsigned chk input.
+    input wire i_aluctrl_unsigned,
     // 32-bit output result. Any carry out (from addition) should be ignored.
     output wire [31:0] o_alu_result,
     // Equality result. This is used downstream to determine if a
@@ -139,10 +137,10 @@ module alu_wrapper (
     wire        o_slt;  // BLT and BLTU
     wire        o_sne;  // BNE
     wire        o_sge;  // BGE and BGEU
-    alu (
+    alu alu_inst(
         .i_opsel(i_opsel),
         .i_sub(i_sub),
-        .i_unsigned(i_unsigned),
+        .i_unsigned(i_aluctrl_unsigned),
         .i_arith(i_arith),
         .i_op1(i_rf_op1),
         .i_op2(i_rf_op2),
@@ -155,7 +153,8 @@ module alu_wrapper (
     ////////////////////////////////////////////
     //////////INPUTS TO THE INSIDE ALU//////////
     ////////////////////////////////////////////
-    assign i_unsigned = (i_alu_ctrl_opsel == 4'b1001)? 1'b1 : 1'b0;
+    //assign i_unsigned = (i_alu_ctrl_opsel == 4'b1001)? 1'b1 : 1'b0;
+
     assign i_arith    = (i_alu_ctrl_opsel == 4'b0111)? 1'b1 : 1'b0;
     assign i_sub      = (i_alu_ctrl_opsel == 4'b0001)? 1'b1 : 1'b0;
     assign i_opsel    = (i_alu_ctrl_opsel == 4'b0000)? 3'b000 :    //ADD
@@ -174,6 +173,71 @@ module alu_wrapper (
     /////////////////OUTPUTS////////////////////
     ////////////////////////////////////////////
     assign o_alu_Zero  = o_eq | o_slt | o_sne | o_sge ; 
+endmodule
+
+
+module alu_control( input  wire [1:0]  i_clu_alu_op,
+                    input  wire [31:0] i_instr_mem_inst,
+                    output wire o_unsigned,
+                    output wire [3:0]  o_alu_control_sel
+                    );
+
+wire [5:0] op_code;
+wire [3:0] decode;
+wire [2:0] funct3;
+wire [6:0] funct7;
+
+assign funct3 = i_instr_mem_inst[14:12];
+assign funct7 = i_instr_mem_inst[31:25];
+assign op_code = i_instr_mem_inst[6:0];
+
+assign o_unsigned = 
+    ((funct3 == 3'b011) && ((op_code == 7'b0110011) || (op_code == 7'b0010011))) ||
+    ((op_code == 7'b0000011) && ((funct3 == 3'b100) || (funct3 == 3'b101))) ||
+    ((op_code == 7'b1100011) && ((funct3 == 3'b110) || (funct3 == 3'b111)));
+
+assign decode = (op_code == 7'b0110011) ? 4'b0000: // R type
+                (op_code == 7'b0010011) ? 4'b0001: // I type
+                (op_code == 7'b0110111) ? 4'b0010: // LUI
+                (op_code == 7'b0010111) ? 4'b0011: // AUIPC
+                (op_code == 7'b0000011) ? 4'b0100: // LOAD
+                (op_code == 7'b0100011) ? 4'b0101: // STORE
+                (op_code == 7'b1100011) ? 4'b0110: // BRANCH
+                (op_code == 7'b1100111) ? 4'b0111: // JALR
+                (op_code == 7'b1101111) ? 4'b1000: // JAL
+                4'bxxxx;
+
+assign o_alu_control_sel = 
+    (i_clu_alu_op == 2'b00) ? 4'b0000 : // Forced Addition (S, U, J)
+    (i_clu_alu_op == 2'b01) ? 4'b0001 : // Forced Subtraction (B) - BEQ , BNE
+    (i_clu_alu_op == 2'b10) ? (
+        (decode == 4'b0000) ? ( // R type
+            (funct3 == 3'b000) ? ((funct7[5]) ? 4'b0001 : 4'b0000) : // sub/add
+            (funct3 == 3'b001) ? 4'b0101 : // sll
+            (funct3 == 3'b010) ? 4'b1000 : // slt //BLT
+            (funct3 == 3'b011) ? 4'b1001 : // sltu
+            (funct3 == 3'b100) ? 4'b0100 : // xor
+            (funct3 == 3'b101) ? ((funct7[5]) ? 4'b0111 : 4'b0110) : // sra/srl
+            (funct3 == 3'b110) ? 4'b0011 : // or
+            (funct3 == 3'b111) ? 4'b0010 : // and
+            4'b0000
+        ) : 
+        (decode == 4'b0001) ? ( // I type
+            (funct3 == 3'b000) ? 4'b0000 : // addi
+            (funct3 == 3'b001) ? 4'b0101 : // slli
+            (funct3 == 3'b010) ? 4'b1000 : // slti
+            (funct3 == 3'b011) ? 4'b1001 : // sltiu
+            (funct3 == 3'b100) ? 4'b0100 : // xori
+            (funct3 == 3'b101) ? ((funct7[5]) ? 4'b0111 : 4'b0110) : // srai/srli
+            (funct3 == 3'b110) ? 4'b0011 : // ori
+            (funct3 == 3'b111) ? 4'b0010 : // andi
+            4'b0000
+        ) :
+        (decode == 4'b0100) ? 4'b0000 : // Load (add base + offset)
+        4'b0000
+    ) :
+    (i_clu_alu_op == 2'b11) ? 4'bxxxx : 4'b0000;
+
 endmodule
 
 module hart #(
@@ -308,50 +372,98 @@ module hart #(
     ,`RVFI_OUTPUTS,
 `endif
 );
-    // Fill in your implementation here.
-/////////////////////////////////////////////////////////////
-///////////////////REG FILE Instance/////////////////////////
-/////////////////////////////////////////////////////////////
-                //BYPASS Not enabled//
+
+// Immediate format decoding
+wire [5:0] i_imm_format;
+assign i_imm_format =   
+    (i_imem_rdata[6:0] == 7'b0110011)? 6'b000001 : // R
+    (i_imem_rdata[6:0] == 7'b0010011)? 6'b000010 : // I
+    (i_imem_rdata[6:0] == 7'b0000011)? 6'b000010 : // I (Load)
+    (i_imem_rdata[6:0] == 7'b0100011)? 6'b000100 : // S
+    (i_imem_rdata[6:0] == 7'b1100011)? 6'b001000 : // B
+    (i_imem_rdata[6:0] == 7'b0110111)? 6'b010000 : // U
+    (i_imem_rdata[6:0] == 7'b1101111)? 6'b100000 : // J
+    6'bXXXXXX;
+
+//------------------------------------//
+// Register File
+//------------------------------------//
+wire [31:0] t_rs2_rdata;
+wire [31:0] i_dmem_alu_muxout_data;
+wire [31:0] o_rs1_rdata;
+
+wire t_clu_ALUSrc, t_clu_MemtoReg, i_clu_branch;
+wire [1:0] i_clu_alu_op;
+
 rf #(.BYPASS_EN(0)) reg_inst(
     .i_clk(i_clk),
     .i_rst(i_rst),
     .i_rs1_raddr(i_imem_rdata[19:15]),
     .i_rs2_raddr(i_imem_rdata[24:20]),
     .i_rd_waddr(i_imem_rdata[11:7]),
-    .i_rd_wen(i_clu_RegWrite), //Input from CLU
-    .i_rd_wdata(i_dmem_alu_muxout_data),   //Muxed out data of ALU and Data Mem
-    .o_rs1_rdata(o_reg_rd1_rdata), //Input to the ALU
-    .o_rs2_rdata(o_reg_rd2_imm_mux_alu_in2_data)  //Input to the reg_imm_alu_in2_mux
+    .i_rd_wen(i_rd_wen),
+    .i_rd_wdata(i_dmem_alu_muxout_data),
+    .o_rs1_rdata(o_rs1_rdata),
+    .o_rs2_rdata(t_rs2_rdata)
 );
 
-//IMM instruction to i_format decoder
-wire [5:0]i_imm_format;
-assign i_imm_format =   (i_imem_rdata[6:0] == 011_0011)? 6'b000_001 : //R
-                    (i_imem_rdata[6:0] == 001_0011)? 6'b000_010 ://I Type
-                    (i_imem_rdata[6:0] == 000_0011)? 6'b000_010 ://I
-                    (i_imem_rdata[6:0] == 010_0011)? 6'b000_100 ://S
-                    (i_imem_rdata[6:0] == 110_0011)? 6'b001_000 ://B
-                    (i_imem_rdata[6:0] == 011_0111)? 6'b010_000 ://U
-                    (i_imem_rdata[6:0] == 110_1111)? 6'b100_000 ://J
-                    6'bX;
-
-//IMM Gen Instance
+// Immediate Generator
+wire [31:0] t_immediate_out_data;
 imm imm_decode_inst(
-        .i_inst(i_imem_rdata),
-        .i_format(i_imm_format),
-        .o_immediate(o_immediate)
+    .i_inst(i_imem_rdata),
+    .i_format(i_imm_format),
+    .o_immediate(t_immediate_out_data)
 );
 
-    //Fetch section instance
+// Fetch Section
+fetch fetch_inst(
+    .clk(i_clk),
+    .rst_n(i_rst),
+    .i_clu_branch(i_clu_branch),
+    .i_alu_o_Zero(i_alu_o_Zero),
+    .i_imm_o_immediate(t_immediate_out_data),
+    .o_instr_mem_rd_addr(o_imem_raddr)
+);
 
-    //ALU Instance
+// ALU Control
+wire [3:0] o_alu_control_sel;
+wire o_unsigned;
+alu_control alu_control_inst( 
+    .i_clu_alu_op(i_clu_alu_op),
+    .i_instr_mem_inst(i_imem_rdata),
+    .o_unsigned(o_unsigned),
+    .o_alu_control_sel(o_alu_control_sel)
+);
 
-    //Main control instance
+// Data Muxes
+assign i_dmem_alu_muxout_data = t_clu_MemtoReg ? i_dmem_rdata : o_dmem_addr;
+assign rs2_rdata_imm_mux_data = t_clu_ALUSrc ? t_immediate_out_data : t_rs2_rdata;
 
-    //ALU Control Instance
+// ALU
+alu_wrapper alu_wrapper_inst(
+    .i_alu_ctrl_opsel(o_alu_control_sel),
+    .i_rf_op1(o_rs1_rdata),
+    .i_rf_op2(rs2_rdata_imm_mux_data),
+    .i_aluctrl_unsigned(o_unsigned),
+    .o_alu_result(o_dmem_addr),
+    .o_alu_Zero(i_alu_o_Zero)
+);
 
+// Control Unit
 
+control_unit control_unit_inst(
+    .clk(i_clk),
+    .rst_n(i_rst),
+    .i_clu_inst(i_imem_rdata),
+    .o_clu_Branch(i_clu_branch),
+    .o_clu_MemRead(o_dmem_ren),
+    .o_clu_MemtoReg(t_clu_MemtoReg),
+    .o_clu_ALUOp(i_clu_alu_op),
+    .o_clu_MemWrite(o_dmem_wen),
+    .o_clu_ALUSrc(t_clu_ALUSrc),
+    .o_clu_RegWrite(i_rd_wen),
+    .o_clu_dmem_mask(o_dmem_mask)
+);
 
 endmodule
 
