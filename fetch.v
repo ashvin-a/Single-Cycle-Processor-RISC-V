@@ -90,12 +90,50 @@ module control_unit(
     output wire o_clu_Branch,
     output wire o_clu_MemRead,
     output wire o_clu_MemtoReg,
-    output wire o_clu_ALUOp,
+    output wire [3:0] o_clu_ALUOp,
     output wire o_clu_MemWrite,
     output wire o_clu_ALUSrc,
     output wire o_clu_RegWrite
 );
+// Defauting values to 0;
+wire o_clu_Branch = 1'b0;
+wire o_clu_MemRead = 1'b0;
+wire o_clu_MemtoReg = 1'b0;
+wire [3:0] o_clu_ALUOp = 3'b000;
+wire o_clu_MemWrite = 1'b0;
+wire o_clu_ALUSrc = 1'b0;
+wire o_clu_RegWrite = 1'b0;
 
+wire [3:0] clu_inst_type; // Decode the type of instruction from the opcode
+assign clu_inst_type = (i_clu_inst[6:0] == 4'b011_0011) ? 4'd0 :  // R - Type instruction
+                        (i_clu_inst[6:0] == 4'b001_0011) ? 4'd1 : // I - Type instruction
+                        (i_clu_inst[6:0] == 4'b011_0111) ? 4'd2 : // LUI instruction
+                        (i_clu_inst[6:0] == 4'b001_0111) ? 4'd3 : // AUIPC instruction
+                        (i_clu_inst[6:0] == 4'b000_0011) ? 4'd4 : // Load Instruction
+                        (i_clu_inst[6:0] == 4'b010_0011) ? 4'd5 : // Store Instruction
+                        (i_clu_inst[6:0] == 4'b110_0011) ? 4'd6 : // Branch Instruction
+                        (i_clu_inst[6:0] == 4'b110_1111) ? 4'd7 : // JAL Instruction
+                        (i_clu_inst[6:0] == 4'b110_0111) ? 4'd8 : // JALR Instruction
+
+assign o_clu_Branch = (clu_inst_type == 4'd6); 
+
+assign o_clu_MemRead = (clu_inst_type == 4'd4);
+
+assign o_clu_MemtoReg = (clu_inst_type == 4'd4);
+
+assign o_clu_MemWrite = (clu_inst_type == 4'd5);
+
+assign o_clu_ALUSrc = (!(clu_inst_type == 4'd0) && !(clu_inst_type == 4'd6));
+
+assign o_clu_RegWrite = (clu_inst_type == 4'd0) || (clu_inst_type == 4'd1) || (clu_inst_type == 4'd2) 
+                        || (clu_inst_type == 4'd3) || (clu_inst_type == 4'd4);
+
+assign o_clu_ALUOp = (clu_inst_type == 4'd0) ? 2'b10 : // R-type - Use funct3 and funct4 to determine ALU Operation
+                     (clu_inst_type == 4'd1) ? 2'b11 : // I-type - Use funct3 to determine ALU operation
+                     (clu_inst_type == 4'd6) ? 2'b01 : // Branch - ALU does subtraction
+                     2'b00;                            // Others (load/store/jump) -  ALU does addition
+
+                    
 endmodule
 
 
