@@ -47,6 +47,42 @@ module control_unit(
     output wire [2:0]o_sign_or_zero_ext_data_mux // This signal will go to 5:1 MUX which will choose between ZERO extend , SIGN EXTEND or NO EXTEND on the read data from the datamem - ONLY FOR LOAD
 );
 
+assign o_clu_Branch =   (i_clu_inst[6:0] == 7'b110_0011); // Branch
+
+assign o_clu_MemRead =  (i_clu_inst[6:0] == 7'b000_0011); // Load
+
+assign o_clu_MemtoReg = (i_clu_inst[6:0] == 7'b000_0011) ? 1'b1 : // Load
+                        (i_clu_inst[6:0] == 7'b110_0011) ? 1'bx : // Store
+                        (i_clu_inst[6:0] == 7'b010_0011) ? 1'bx : // Branch
+                        1'b0;
+
+assign o_clu_MemWrite = (i_clu_inst[6:0] == 7'b010_0011);   // Store
+
+assign o_clu_ALUSrc =   (i_clu_inst[6:0] == 7'b001_0011) || // I type
+                        (i_clu_inst[6:0] == 7'b011_0111) || // LUI
+                        (i_clu_inst[6:0] == 7'b001_0111) || // AUIPC
+                        (i_clu_inst[6:0] == 7'b000_0011) || // Load
+                        (i_clu_inst[6:0] == 7'b010_0011);   // Store
+
+assign o_clu_RegWrite = (i_clu_inst[6:0] == 7'b011_0011) || // R type
+                        (i_clu_inst[6:0] == 7'b001_0011) || // I type
+                        (i_clu_inst[6:0] == 7'b011_0111) || // LUI
+                        (i_clu_inst[6:0] == 7'b001_0111) || // AUIPC
+                        (i_clu_inst[6:0] == 7'b000_0011);   // Load
+
+assign o_clu_dmem_mask = ((i_clu_inst[6:0] == 7'b000_0011) || (i_clu_inst[6:0] == 7'b010_0011)) ? ( // Check for Load/Store instruction
+                           (i_clu_inst[14:12] == 3'b000)? 4'b0001  : 
+                           (i_clu_inst[14:12] == 3'b001)? 4'b0011  :
+                           (i_clu_inst[14:12] == 3'b010)? 4'b1111  :
+                           (i_clu_inst[14:12] == 3'b100)? 4'b0001  :
+                           (i_clu_inst[14:12] == 3'b101)? 4'b0011  :
+                           4'b1111) : 
+                        4'b1111;
+
+assign o_clu_ALUOp =    ((i_clu_inst[6:0] == 7'b011_0011) || (i_clu_inst[6:0] == 7'b001_0011)) ?  2'b10 : // R and I type 
+                        (i_clu_inst[6:0] == 7'b110_0011) ? 2'b10 : //Branch
+                        2'b00;
+
 assign o_clu_branch_instr_alu_sel  =    (i_clu_inst[6:0] == 7'b110_0011)? (      //Check for BRANCH Instruction type
                                         (i_clu_inst[14:12] == 3'b000)? 2'b00  : //beq
                                         (i_clu_inst[14:12] == 3'b001)? 2'b01  : //bne
@@ -55,6 +91,14 @@ assign o_clu_branch_instr_alu_sel  =    (i_clu_inst[6:0] == 7'b110_0011)? (     
                                         (i_clu_inst[14:12] == 3'b110)? 2'b10  : //bltu
                                         (i_clu_inst[14:12] == 3'b111)? 2'b11  : 2'bxx) : //bgeu
                                         2'bxx;
+
+assign o_clu_lui_auipc_mux_sel =    (i_clu_inst[6:0] == 7'b011_0111) ? 2'b01 :
+                                    (i_clu_inst[6:0] == 7'b001_0111) ? 2'b10 : 
+                                    2'b00;
+
+assign o_sign_or_zero_ext_data_mux =    ((i_clu_inst[6:0] == 7'b000_0011) && ((i_clu_inst[14:12] == 3'b000) || (i_clu_inst[14:12] == 3'b001) || (i_clu_inst[14:12] == 3'b010))) ? 1'b0 :
+                                        ((i_clu_inst[6:0] == 7'b000_0011) && ((i_clu_inst[14:12] == 3'b100) || (i_clu_inst[14:12] == 3'b101) )) ? 1'b1 :
+                                        1'bx;
 
 endmodule
 
