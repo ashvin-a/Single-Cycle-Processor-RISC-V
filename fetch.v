@@ -12,10 +12,16 @@ module fetch (
     input  wire i_clu_branch,
     input  wire i_alu_o_Zero,
     input  wire [31:0]i_imm_o_immediate,
+    output wire [31:0]o_instr_mem_rd_addr // read address is 32 bits and not 5 bits
+    input  wire i_alu_o_Zero,
+    input  wire [31:0]i_imm_o_immediate,
     output wire [31:0]o_instr_mem_rd_addr, // read address is 32 bits and not 5 bits
     output reg  [31:0] PC
 );
     reg [31:0] PC;
+    wire [31:0]pc_imm_mux_val;
+    ///[Q] : Should it be o_slt or o_eq?
+    assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? (PC + {{i_imm_o_immediate[31:1],1'b0}}) : (PC + 4) ; 
     wire [31:0]pc_imm_mux_val;
     ///[Q] : Should it be o_slt or o_eq?
     assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? (PC + {{i_imm_o_immediate[31:1],1'b0}}) : (PC + 4) ; 
@@ -30,66 +36,6 @@ module fetch (
         end
     end
 endmodule
-/////////////////////////////////////////////////
-/////////////////Instruction Memory/////////////////////
-/////////////////////////////////////////////////
-//[Q2] What is the size of the instruction memory? - Assuming 16KB for now
-//[Q] Who is initialising the insturction memory? How are the instructions initially written into the memory?
-module instruction_memory(
-    input  wire clk,
-    input  wire rst_n,
-    input  wire [31:0]i_instr_mem_rd_addr,
-    // output instruction word. This is used to extract the relevant immediate
-    // bits and assemble them into the final immediate.
-    output wire [31:0] o_inst
-);
-    reg [31:0] instr_mem [4095:0];//16 KB Memory with 32 bit instruction in each location
-    reg [31:0] t_inst_reg; //temporary reg for o_inst
-    always @(posedge clk or negedge rst_n) begin
-        if(!rst_n) begin
-            t_inst_reg <= 0; // [Q3] Should it be don't care instead of 0?
-            for (i = 0;i<4096;i++) begin
-                instr_mem[i] <= 32'b0;
-            end
-        end
-        else if (i_instr_mem_rd_addr)
-            t_inst_reg <= instr_mem [i_instr_mem_rd_addr];
-    end
-    assign o_inst = t_inst_reg;
-endmodule
-/////////////////////////////////////////////////
-/////////////////Data Memory/////////////////////
-/////////////////////////////////////////////////
-//[Q] Shall I assume that that instructions will always be 32 bit? - I guess Yes
-//[Q] Will there be a negative case where both MemWrite and MemRead will be high?
-//[Q] Who is initialising the data memory? And Should I be initializing to zero??
-module data_memory(
-    input  wire clk,
-    input  wire rst_n,
-    input  wire i_clu_MemWrite,
-    input  wire i_clu_MemRead,
-    input  wire [31:0]i_data_mem_addr, // This can be for both read and write
-    input  wire [31:0] i_data_mem_wr_data, //Coming from Reg block o_rd_data2
-    output wire [31:0] o_data_mem_rd_data 
-);
-    reg [31:0] data_mem [4095:0];//16 KB Memory with 32 bit data in each location
-    reg [31:0] t_data_mem_rd_data_reg;
-    always @(posedge clk or negedge rst_n) begin
-        if(!rst_n) begin
-            for (i = 0;i<4096;i++) begin
-                data_mem[i] <= 32'b0;
-            end
-        end
-        if (i_data_mem_addr && i_clu_MemRead && !i_clu_MemWrite)
-            t_data_mem_rd_data_reg <= data_mem [i_data_mem_addr];
-        if (i_data_mem_addr && !i_clu_MemRead && i_clu_MemWrite) // Wrote a seperate if - independent
-                data_mem[i_data_mem_addr] <= i_data_mem_wr_data;
-    end
-    assign o_data_mem_rd_data = t_data_mem_rd_data_reg;
-
-    //Also add a mux at the end
-
-endmodule
 
 module control_unit(
     input  wire clk,
@@ -101,6 +47,9 @@ module control_unit(
     output wire [1:0]o_clu_ALUOp,
     output wire o_clu_MemWrite,
     output wire o_clu_ALUSrc,
+    output wire o_clu_RegWrite,
+    output wire o_clu_dmem_mask
+);
     output wire o_clu_RegWrite,
     output wire [3:0]o_clu_dmem_mask,
     output wire o_clu_lui_auipc_mux_sel, // The Mux in between reg and alu for lui and auipc instruction implementation
@@ -161,7 +110,14 @@ module alu (
     output wire        o_eq,
     // Set less than result. This is used downstream to determine if a
     // branch should be taken.
-    output wire        o_slt // BLT and BLTU
+    output wire        o_slt, // BLT and BLTU
+   // Set Not Equal result. This is used downstream to determine if a
+    // branch should be taken.
+    output wire        o_sne,  // BNE
+   // Set Greater than result. This is used downstream to determine if a
+    // branch should be taken.
+    output wire        o_sge  // BGE and BGEU
+
 );
 
     wire [4:0]temp = i_op2[4:0];
@@ -173,6 +129,8 @@ module alu (
 
     assign o_eq  = (i_op1 == i_op2);
     assign o_slt =  i_unsigned ? (i_op1 <  i_op2) : ($signed(i_op1) <  $signed(i_op2));
+    assign o_sne =  i_unsigned ? (i_op1 != i_op2) : ($signed(i_op1) != $signed(i_op2));
+    assign o_sge =  i_unsigned ? (i_op1 >= i_op2) : ($signed(i_op1) >= $signed(i_op2));
     assign o_result =       (i_opsel == 3'b000)? ((i_sub) ? (i_op1 - i_op2) : (i_op1 + i_op2)) :
                             (i_opsel == 3'b001)? (i_op1 << temp) : 
                             ((i_opsel == 3'b010) || (i_opsel == 3'b011)) ? (i_unsigned ? slt_unsigned : slt_signed) : 
@@ -181,7 +139,7 @@ module alu (
                             (i_opsel == 3'b110)? (i_op1 | i_op2) : 
                             (i_opsel == 3'b111)? (i_op1 & i_op2) : 
                             32'h0;
-    
+
 endmodule
 
 module alu_wrapper (
@@ -191,8 +149,8 @@ module alu_wrapper (
     input  wire [31:0] i_rf_op1,
     // Second 32-bit input operand.
     input  wire [31:0] i_rf_op2,
-    // Signal for Branch instruction selection coming from alu control
-    input wire [1:0]i_clu_branch_instr_alu_sel,
+    //Aluctrl unsigned chk input.
+    input wire i_aluctrl_unsigned,
     // 32-bit output result. Any carry out (from addition) should be ignored.
     output wire [31:0] o_alu_result,
     // Equality result. This is used downstream to determine if a
@@ -204,7 +162,9 @@ module alu_wrapper (
     wire        i_unsigned;
     wire        i_arith;
     wire        o_eq;
-    wire        o_slt;
+    wire        o_slt;  // BLT and BLTU
+    wire        o_sne;  // BNE
+    wire        o_sge;  // BGE and BGEU
     alu alu_inst(
         .i_opsel(i_opsel),
         .i_sub(i_sub),
@@ -214,12 +174,15 @@ module alu_wrapper (
         .i_op2(i_rf_op2),
         .o_result(o_alu_result),
         .o_eq(o_eq),
-        .o_slt(o_slt)
+        .o_slt(o_slt),
+        .o_sne(o_sne),
+        .o_sge(o_sge)
     );
     ////////////////////////////////////////////
     //////////INPUTS TO THE INSIDE ALU//////////
     ////////////////////////////////////////////
-    assign i_unsigned = (i_alu_ctrl_opsel == 4'b1001)? 1'b1 : 1'b0; // Whenever it is SLTU , we will enable the unsigned signal high
+    //assign i_unsigned = (i_alu_ctrl_opsel == 4'b1001)? 1'b1 : 1'b0;
+
     assign i_arith    = (i_alu_ctrl_opsel == 4'b0111)? 1'b1 : 1'b0;
     assign i_sub      = (i_alu_ctrl_opsel == 4'b0001)? 1'b1 : 1'b0;
     assign i_opsel    = (i_alu_ctrl_opsel == 4'b0000)? 3'b000 :    //ADD
@@ -230,49 +193,54 @@ module alu_wrapper (
                         (i_alu_ctrl_opsel == 4'b0101)? 3'b001 :    //SLL   
                         (i_alu_ctrl_opsel == 4'b0110)? 3'b101 :    //SRL   
                         (i_alu_ctrl_opsel == 4'b0111)? 3'b101 :    //SRA   
-                        (i_alu_ctrl_opsel == 4'b1000)? 3'b010 :    //SLT
+                        (i_alu_ctrl_opsel == 4'b1000)? 3'b010 :    //SLT   - 010 and 011
                         (i_alu_ctrl_opsel == 4'b1001)? 3'b010 :    //SLTU   
                         (i_alu_ctrl_opsel == 4'b1010)? 3'b011 :    //PASS_B - LUI   - Can I use 011 for LUI?
-                        3'bXXX; //Don't care               
-    
+                        3'bXXX; //Don't care                               
     ////////////////////////////////////////////
     /////////////////OUTPUTS////////////////////
     ////////////////////////////////////////////
-    assign o_alu_Zero = (i_clu_branch_instr_alu_sel == 2'b00) ?   o_eq :  //BEQ
-                        (i_clu_branch_instr_alu_sel == 2'b01) ?  ~o_eq :  //BNE
-                        (i_clu_branch_instr_alu_sel == 2'b10) ?  o_slt :  //BLT / BLTU - Should I give an and condition to (i_alu_ctrl_opsel == 4'b1001) for BLTU ? - No - Taken care by i_unsigned inside ALU
-                        ~o_slt;                                           //BGE / BGEU - Should I give an and condition to (i_alu_ctrl_opsel == 4'b1001) for BGEU ? - No - Taken care by i_unsigned inside ALU
-                        
+    assign o_alu_Zero  = o_eq | o_slt | o_sne | o_sge ; 
 endmodule
 
 
 module alu_control( input  wire [1:0]  i_clu_alu_op,
                     input  wire [31:0] i_instr_mem_inst,
+                    output wire o_unsigned,
                     output wire [3:0]  o_alu_control_sel
                     );
 
 wire [5:0] op_code;
+wire [3:0] decode;
 wire [2:0] funct3;
 wire [6:0] funct7;
-wire opcode_5thbit_add_sub;
 
-assign funct3  = i_instr_mem_inst[14:12];
-assign funct7  = i_instr_mem_inst[31:25];
+assign funct3 = i_instr_mem_inst[14:12];
+assign funct7 = i_instr_mem_inst[31:25];
 assign op_code = i_instr_mem_inst[6:0];
-assign opcode_5thbit_add_sub = i_instr_mem_inst[5];
+
+assign o_unsigned = 
+    ((funct3 == 3'b011) && ((op_code == 7'b0110011) || (op_code == 7'b0010011))) ||
+    ((op_code == 7'b0000011) && ((funct3 == 3'b100) || (funct3 == 3'b101))) ||
+    ((op_code == 7'b1100011) && ((funct3 == 3'b110) || (funct3 == 3'b111)));
+
+assign decode = (op_code == 7'b0110011) ? 4'b0000: // R type
+                (op_code == 7'b0010011) ? 4'b0001: // I type
+                (op_code == 7'b0110111) ? 4'b0010: // LUI
+                (op_code == 7'b0010111) ? 4'b0011: // AUIPC
+                (op_code == 7'b0000011) ? 4'b0100: // LOAD
+                (op_code == 7'b0100011) ? 4'b0101: // STORE
+                (op_code == 7'b1100011) ? 4'b0110: // BRANCH
+                (op_code == 7'b1100111) ? 4'b0111: // JALR
+                (op_code == 7'b1101111) ? 4'b1000: // JAL
+                4'bxxxx;
 
 assign o_alu_control_sel = 
-    (i_clu_alu_op == 2'b00) ? 4'b0000 : // Forced Addition (S, U, J) - Here we can have I' and S as well
-    (i_clu_alu_op == 2'b01) ?           // Forced Subtraction (B) - BEQ , BNE - This needs to be updated - Add a func3 check here
-            ((funct3 == 3'b000) ? 4'b1000 : //beq 
-             (funct3 == 3'b001) ? 4'b1000 : //bne
-             (funct3 == 3'b100) ? 4'b1000 : //blt 
-             (funct3 == 3'b101) ? 4'b1000 : //bge
-             (funct3 == 3'b110) ? 4'b1001 : //bltu 
-             (funct3 == 3'b111) ? 4'b1001 : //bgeu
-             4'bxxxx) :
+    (i_clu_alu_op == 2'b00) ? 4'b0000 : // Forced Addition (S, U, J)
+    (i_clu_alu_op == 2'b01) ? 4'b0001 : // Forced Subtraction (B) - BEQ , BNE
     (i_clu_alu_op == 2'b10) ? (
-            (funct3 == 3'b000) ? (opcode_5thbit_add_sub? ((funct7[5]) ? 4'b0001 : 4'b0000) : 4'b0000) : // sub/add
+        (decode == 4'b0000) ? ( // R type
+            (funct3 == 3'b000) ? ((funct7[5]) ? 4'b0001 : 4'b0000) : // sub/add
             (funct3 == 3'b001) ? 4'b0101 : // sll
             (funct3 == 3'b010) ? 4'b1000 : // slt //BLT
             (funct3 == 3'b011) ? 4'b1001 : // sltu
@@ -280,8 +248,23 @@ assign o_alu_control_sel =
             (funct3 == 3'b101) ? ((funct7[5]) ? 4'b0111 : 4'b0110) : // sra/srl
             (funct3 == 3'b110) ? 4'b0011 : // or
             (funct3 == 3'b111) ? 4'b0010 : // and
-            4'bxxxx) :
-    (i_clu_alu_op == 2'b11) ? 4'bxxxx : 4'bxxxx;
+            4'b0000
+        ) : 
+        (decode == 4'b0001) ? ( // I type
+            (funct3 == 3'b000) ? 4'b0000 : // addi
+            (funct3 == 3'b001) ? 4'b0101 : // slli
+            (funct3 == 3'b010) ? 4'b1000 : // slti
+            (funct3 == 3'b011) ? 4'b1001 : // sltiu
+            (funct3 == 3'b100) ? 4'b0100 : // xori
+            (funct3 == 3'b101) ? ((funct7[5]) ? 4'b0111 : 4'b0110) : // srai/srli
+            (funct3 == 3'b110) ? 4'b0011 : // ori
+            (funct3 == 3'b111) ? 4'b0010 : // andi
+            4'b0000
+        ) :
+        (decode == 4'b0100) ? 4'b0000 : // Load (add base + offset)
+        4'b0000
+    ) :
+    (i_clu_alu_op == 2'b11) ? 4'bxxxx : 4'b0000;
 
 endmodule
 
@@ -420,21 +403,6 @@ module hart #(
 
 // Immediate format decoding
 wire [5:0] i_imm_format;
-wire [31:0] t_rs2_rdata;
-wire [31:0] i_dmem_alu_muxout_data;
-wire [31:0] o_rs1_rdata;
-wire [31:0] rs2_rdata_imm_mux_data;
-wire [3:0] o_alu_control_sel;
-wire o_unsigned;
-wire t_clu_ALUSrc, t_clu_MemtoReg, i_clu_branch;
-wire [31:0] PC_current_val;
-wire [31:0] t_lui_auipc_mux_data;
-wire t_clu_lui_auipc_mux_sel;
-wire t_clu_branc_instr_alu_sel;
-wire [2:0]t_sign_or_zero_ext_data_mux;
-wire [1:0] t_clu_branch_instr_alu_sel;
-wire [1:0]t_clu_alu_op;
-
 assign i_imm_format =   
     (i_imem_rdata[6:0] == 7'b0110011)? 6'b000001 : // R
     (i_imem_rdata[6:0] == 7'b0010011)? 6'b000010 : // I
@@ -445,7 +413,16 @@ assign i_imm_format =
     (i_imem_rdata[6:0] == 7'b1101111)? 6'b100000 : // J
     6'bXXXXXX;
 
+//------------------------------------//
 // Register File
+//------------------------------------//
+wire [31:0] t_rs2_rdata;
+wire [31:0] i_dmem_alu_muxout_data;
+wire [31:0] o_rs1_rdata;
+
+wire t_clu_ALUSrc, t_clu_MemtoReg, i_clu_branch;
+wire [1:0] i_clu_alu_op;
+
 rf #(.BYPASS_EN(0)) reg_inst(
     .i_clk(i_clk),
     .i_rst(i_rst),
@@ -457,7 +434,7 @@ rf #(.BYPASS_EN(0)) reg_inst(
     .o_rs1_rdata(o_rs1_rdata),
     .o_rs2_rdata(t_rs2_rdata)
 );
- 
+
 // Immediate Generator
 wire [31:0] t_immediate_out_data;
 imm imm_decode_inst(
@@ -473,43 +450,35 @@ fetch fetch_inst(
     .i_clu_branch(i_clu_branch),
     .i_alu_o_Zero(i_alu_o_Zero),
     .i_imm_o_immediate(t_immediate_out_data),
-    .PC(PC_current_val),
     .o_instr_mem_rd_addr(o_imem_raddr)
 );
 
 // ALU Control
+wire [3:0] o_alu_control_sel;
+wire o_unsigned;
 alu_control alu_control_inst( 
-    .i_clu_alu_op(t_clu_alu_op),
+    .i_clu_alu_op(i_clu_alu_op),
     .i_instr_mem_inst(i_imem_rdata),
+    .o_unsigned(o_unsigned),
     .o_alu_control_sel(o_alu_control_sel)
 );
 
-//  Muxes
-//CAN I USE MASK HERE SOMEHOW?
-assign  i_dmem_rdata_sign_or_zero_ext_mux_data  =   (t_sign_or_zero_ext_data_mux == 3'b000)? {24'b0,i_dmem_rdata[7:0]} :                      //ZERO EXTEND - lbu
-                                                    (t_sign_or_zero_ext_data_mux == 3'b001)? {{24{i_dmem_rdata[7]}},i_dmem_rdata[7:0]} :      //SIGN EXTEND - lb
-                                                    (t_sign_or_zero_ext_data_mux == 3'b010)? {16'b0,i_dmem_rdata[15:0]} :                     //ZERO EXTEND - lhu
-                                                    (t_sign_or_zero_ext_data_mux == 3'b011)? {{16{i_dmem_rdata[15]}},i_dmem_rdata[15:0]} :    //SIGN EXTEND - lh
-                                                    (t_sign_or_zero_ext_data_mux == 3'b100)? i_dmem_rdata :                                   //NO EXTEND
-                                                    i_dmem_rdata;
-assign i_dmem_alu_muxout_data                   =   t_clu_MemtoReg ? i_dmem_rdata_sign_or_zero_ext_mux_data : o_dmem_addr;
-assign rs2_rdata_imm_mux_data                   =   t_clu_ALUSrc ? t_immediate_out_data : t_rs2_rdata;
-assign t_lui_auipc_mux_data                     =   (t_clu_lui_auipc_mux_sel == 2'b00)? o_rs1_rdata :    //Default
-                                                    (t_clu_lui_auipc_mux_sel == 2'b01)? 32'b0 :          //LUI
-                                                    (t_clu_lui_auipc_mux_sel == 2'b10)? PC_current_val : //AUIPC
-                                                    o_rs1_rdata;
+// Data Muxes
+assign i_dmem_alu_muxout_data = t_clu_MemtoReg ? i_dmem_rdata : o_dmem_addr;
+assign rs2_rdata_imm_mux_data = t_clu_ALUSrc ? t_immediate_out_data : t_rs2_rdata;
 
 // ALU
 alu_wrapper alu_wrapper_inst(
     .i_alu_ctrl_opsel(o_alu_control_sel),
-    .i_rf_op1(t_lui_auipc_mux_data), //replaced it with Muxed out data from the 4:1 mux
+    .i_rf_op1(o_rs1_rdata),
     .i_rf_op2(rs2_rdata_imm_mux_data),
-    .i_clu_branch_instr_alu_sel(t_clu_branch_instr_alu_sel),
+    .i_aluctrl_unsigned(o_unsigned),
     .o_alu_result(o_dmem_addr),
     .o_alu_Zero(i_alu_o_Zero)
 );
 
 // Control Unit
+
 control_unit control_unit_inst(
     .clk(i_clk),
     .rst_n(i_rst),
@@ -517,14 +486,13 @@ control_unit control_unit_inst(
     .o_clu_Branch(i_clu_branch),
     .o_clu_MemRead(o_dmem_ren),
     .o_clu_MemtoReg(t_clu_MemtoReg),
-    .o_clu_ALUOp(t_clu_alu_op),
+    .o_clu_ALUOp(i_clu_alu_op),
     .o_clu_MemWrite(o_dmem_wen),
     .o_clu_ALUSrc(t_clu_ALUSrc),
     .o_clu_RegWrite(i_rd_wen),
-    .o_clu_dmem_mask(o_dmem_mask),
-    .o_clu_lui_auipc_mux_sel(t_clu_lui_auipc_mux_sel),
-    .o_clu_branch_instr_alu_sel(t_clu_branch_instr_alu_sel),
-    .o_sign_or_zero_ext_data_mux(t_sign_or_zero_ext_data_mux)
+    .o_clu_dmem_mask(o_dmem_mask)
 );
 
 endmodule
+
+`default_nettype wire
