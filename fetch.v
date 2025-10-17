@@ -1,3 +1,9 @@
+//NEED EXTRA MUX to control the ZERO EXTEND AND SIGN EXTEND ON THE ALU OUT DATA FOR I' AND S Instruction type - lb , lh , lbu , lhu - On the data coming out of the DATA MEM. This SIGN EXT is controlled by the Main control signal (NEW)
+//o_sign_or_zero_ext_data_mux - Can i avoid this 3 bit mux sel signal by any chance - Can i use func3 instead?
+// BGE has greater than or equal to condition - Make sure it is covered??
+// check all the Dont care cases I have defined - is it ok to define Dont care
+// Module to Module connections - Ensure I have local temp wires to get the output and then connect to the next module (or else it will assume a single bit connection)
+
 //Who will control the PC? - What is the signal input fromt he control Unit?
 //Shall we assume PC will have 0 as the address location value?
 module fetch (
@@ -7,8 +13,15 @@ module fetch (
     input  wire i_alu_o_Zero,
     input  wire [31:0]i_imm_o_immediate,
     output wire [31:0]o_instr_mem_rd_addr // read address is 32 bits and not 5 bits
+    input  wire i_alu_o_Zero,
+    input  wire [31:0]i_imm_o_immediate,
+    output wire [31:0]o_instr_mem_rd_addr, // read address is 32 bits and not 5 bits
+    output reg  [31:0] PC
 );
     reg [31:0] PC;
+    wire [31:0]pc_imm_mux_val;
+    ///[Q] : Should it be o_slt or o_eq?
+    assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? (PC + {{i_imm_o_immediate[31:1],1'b0}}) : (PC + 4) ; 
     wire [31:0]pc_imm_mux_val;
     ///[Q] : Should it be o_slt or o_eq?
     assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? (PC + {{i_imm_o_immediate[31:1],1'b0}}) : (PC + 4) ; 
@@ -31,51 +44,28 @@ module control_unit(
     output wire o_clu_Branch,
     output wire o_clu_MemRead,
     output wire o_clu_MemtoReg,
-    output wire [3:0] o_clu_ALUOp,
+    output wire [1:0]o_clu_ALUOp,
     output wire o_clu_MemWrite,
     output wire o_clu_ALUSrc,
     output wire o_clu_RegWrite,
     output wire o_clu_dmem_mask
 );
-// Defauting values to 0;
-wire o_clu_Branch = 1'b0;
-wire o_clu_MemRead = 1'b0;
-wire o_clu_MemtoReg = 1'b0;
-wire [3:0] o_clu_ALUOp = 3'b000;
-wire o_clu_MemWrite = 1'b0;
-wire o_clu_ALUSrc = 1'b0;
-wire o_clu_RegWrite = 1'b0;
+    output wire o_clu_RegWrite,
+    output wire [3:0]o_clu_dmem_mask,
+    output wire o_clu_lui_auipc_mux_sel, // The Mux in between reg and alu for lui and auipc instruction implementation
+    output wire [1:0]o_clu_branch_instr_alu_sel, // Should be invalid by default
+    output wire [2:0]o_sign_or_zero_ext_data_mux // This signal will go to 5:1 MUX which will choose between ZERO extend , SIGN EXTEND or NO EXTEND on the read data from the datamem - ONLY FOR LOAD
+);
 
-wire [3:0] clu_inst_type; // Decode the type of instruction from the opcode
-assign clu_inst_type = (i_clu_inst[6:0] == 4'b011_0011) ? 4'd0 :  // R - Type instruction
-                        (i_clu_inst[6:0] == 4'b001_0011) ? 4'd1 : // I - Type instruction
-                        (i_clu_inst[6:0] == 4'b011_0111) ? 4'd2 : // LUI instruction
-                        (i_clu_inst[6:0] == 4'b001_0111) ? 4'd3 : // AUIPC instruction
-                        (i_clu_inst[6:0] == 4'b000_0011) ? 4'd4 : // Load Instruction
-                        (i_clu_inst[6:0] == 4'b010_0011) ? 4'd5 : // Store Instruction
-                        (i_clu_inst[6:0] == 4'b110_0011) ? 4'd6 : // Branch Instruction
-                        (i_clu_inst[6:0] == 4'b110_1111) ? 4'd7 : // JAL Instruction
-                        (i_clu_inst[6:0] == 4'b110_0111) ? 4'd8 : // JALR Instruction
+assign o_clu_branch_instr_alu_sel  =    (i_clu_inst[6:0] == 7'b110_0011)? (      //Check for BRANCH Instruction type
+                                        (i_clu_inst[14:12] == 3'b000)? 2'b00  : //beq
+                                        (i_clu_inst[14:12] == 3'b001)? 2'b01  : //bne
+                                        (i_clu_inst[14:12] == 3'b100)? 2'b10  : //blt
+                                        (i_clu_inst[14:12] == 3'b101)? 2'b11  : //bge
+                                        (i_clu_inst[14:12] == 3'b110)? 2'b10  : //bltu
+                                        (i_clu_inst[14:12] == 3'b111)? 2'b11  : 2'bxx) : //bgeu
+                                        2'bxx;
 
-assign o_clu_Branch = (clu_inst_type == 4'd6); 
-
-assign o_clu_MemRead = (clu_inst_type == 4'd4);
-
-assign o_clu_MemtoReg = (clu_inst_type == 4'd4);
-
-assign o_clu_MemWrite = (clu_inst_type == 4'd5);
-
-assign o_clu_ALUSrc = (!(clu_inst_type == 4'd0) && !(clu_inst_type == 4'd6));
-
-assign o_clu_RegWrite = (clu_inst_type == 4'd0) || (clu_inst_type == 4'd1) || (clu_inst_type == 4'd2) 
-                        || (clu_inst_type == 4'd3) || (clu_inst_type == 4'd4);
-
-assign o_clu_ALUOp = (clu_inst_type == 4'd0) ? 2'b10 : // R-type - Use funct3 and funct4 to determine ALU Operation
-                     (clu_inst_type == 4'd1) ? 2'b11 : // I-type - Use funct3 to determine ALU operation
-                     (clu_inst_type == 4'd6) ? 2'b01 : // Branch - ALU does subtraction
-                     2'b00;                            // Others (load/store/jump) -  ALU does addition
-
-                    
 endmodule
 
 // The arithmetic logic unit (ALU) is responsible for performing the core
