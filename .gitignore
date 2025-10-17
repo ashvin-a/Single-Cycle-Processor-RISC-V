@@ -3,3 +3,4 @@ ECE552*
 imm_tb.sv
 rf_tb.sv
 transcript
+.history/
