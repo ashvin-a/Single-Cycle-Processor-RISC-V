@@ -135,7 +135,255 @@ module alu_wrapper (
     assign o_alu_Zero  = o_eq | o_slt | o_sne | o_sge ; 
 endmodule
 
-`default_nettype wire
+
+module alu_control( input  wire [1:0]  i_clu_alu_op,
+                    input  wire [31:0] i_instr_mem_inst,
+                    output wire o_unsigned, //Should be removed - Sreeraj and keep it at ALU Wrapper itself based on SLTU opcode status.
+                    output wire [3:0]  o_alu_control
+                    );
+
+wire [5:0] op_code;
+wire [3:0] decode;
+wire [2:0] funct3;
+wire [6:0] funct7;
+
+assign funct3 = i_instr_mem_inst[14:12];
+assign funct7 = i_instr_mem_inst[31:25];
+assign op_code = i_instr_mem_inst[6:0];
+assign o_unsigned = (((funct3 == 3'b011) && (op_code == 7'b0110011) || (op_code == 7'0010011)) || 
+                     ((op_code == 7'b0000011) && (funct3 == 3'b100 || funct3 == 3'b101)) ||
+                     ((op_code == 7'b1100011) && (funct3 == 3'b110 || funct3 == 3'b111))) ?
+                    1'b1: 1'b0; // Sets to 1 if its unsigned
+
+assign decode = (op_code == 7'b0110011) ? 4'b0000: // R type
+                (op_code == 7'b0010011) ? 4'b0001: // I type
+                (op_code == 7'b0110111) ? 4'b0010: // LUI
+                (op_code == 7'b0010111) ? 4'b0011: // AUIPC
+                (op_code == 7'b0000011) ? 4'b0100: // LOAD
+                (op_code == 7'b0100011) ? 4'b0101: // STORE
+                (op_code == 7'b1100011) ? 4'b0110: // BRANCH
+                (op_code == 7'b1100111) ? 4'b0111: // JALR
+                (op_code == 7'b1101111) ? 4'b1000; // JAL
+
+assign o_alu_control = 
+    (i_clu_alu_op == 2'b00) ? 4'b0000 : // Forced Addition (S, U, J)
+    (i_clu_alu_op == 2'b01) ? 4'b0001 : // Forced Subtraction (B) - BEQ , BNE
+    (i_clu_alu_op == 2'b10) ? (
+        (decode == 4'b0000) ? ( // R type
+            (funct3 == 3'b000) ? ((funct7[5]) ? 4'b0001 : 4'b0000) : // sub/add
+            (funct3 == 3'b001) ? 4'b0101 : // sll
+            (funct3 == 3'b010) ? 4'b1000 : // slt //BLT
+            (funct3 == 3'b011) ? 4'b1001 : // sltu
+            (funct3 == 3'b100) ? 4'b0100 : // xor
+            (funct3 == 3'b101) ? ((funct7[5]) ? 4'b0111 : 4'b0110) : // sra/srl
+            (funct3 == 3'b110) ? 4'b0011 : // or
+            (funct3 == 3'b111) ? 4'b0010 : // and
+            4'b0000
+        ) : 
+        (decode == 4'b0001) ? ( // I type
+            (funct3 == 3'b000) ? 4'b0000 : // addi
+            (funct3 == 3'b001) ? 4'b0101 : // slli
+            (funct3 == 3'b010) ? 4'b1000 : // slti
+            (funct3 == 3'b011) ? 4'b1001 : // sltiu
+            (funct3 == 3'b100) ? 4'b0100 : // xori
+            (funct3 == 3'b101) ? ((funct7[5]) ? 4'b0111 : 4'b0110) : // srai/srli
+            (funct3 == 3'b110) ? 4'b0011 : // ori
+            (funct3 == 3'b111) ? 4'b0010 : // andi
+            4'b0000
+        ) :
+        (decode == 4'b0100) ? 4'b0000 : // Load (add base + offset)
+        4'b0000
+    ) :
+    (i_clu_alu_op == 2'b11) ? 4'bxxxx : 4'b0000;
+
+endmodule
+
+module alu_wrapper (
+    // 4 bit input from ALU Control block
+    input  wire [ 3:0] i_alu_ctrl_opsel,
+    // First 32-bit input operand.
+    input  wire [31:0] i_rf_op1,
+    // Second 32-bit input operand.
+    input  wire [31:0] i_rf_op2,
+    //Aluctrl unsigned chk input.
+    input wire i_aluctrl_unsigned,
+    // 32-bit output result. Any carry out (from addition) should be ignored.
+    output wire [31:0] o_alu_result,
+    // Equality result. This is used downstream to determine if a
+    // branch should be taken. (case of BLT/U , BGE/U , BNE , BEQ)
+    output wire        o_alu_Zero
+);
+    wire [ 2:0] i_opsel;
+    wire        i_sub;
+    wire        i_unsigned;
+    wire        i_arith;
+    wire        o_eq;
+    wire        o_slt;  // BLT and BLTU
+    wire        o_sne;  // BNE
+    wire        o_sge;  // BGE and BGEU
+    alu alu_inst(
+        .i_opsel(i_opsel),
+        .i_sub(i_sub),
+        .i_unsigned(i_aluctrl_unsigned),
+        .i_arith(i_arith),
+        .i_op1(i_rf_op1),
+        .i_op2(i_rf_op2),
+        .o_result(o_alu_result),
+        .o_eq(o_eq),
+        .o_slt(o_slt),
+        .o_sne(o_sne),
+        .o_sge(o_sge)
+    );
+    ////////////////////////////////////////////
+    //////////INPUTS TO THE INSIDE ALU//////////
+    ////////////////////////////////////////////
+    //assign i_unsigned = (i_alu_ctrl_opsel == 4'b1001)? 1'b1 : 1'b0;
+
+    assign i_arith    = (i_alu_ctrl_opsel == 4'b0111)? 1'b1 : 1'b0;
+    assign i_sub      = (i_alu_ctrl_opsel == 4'b0001)? 1'b1 : 1'b0;
+    assign i_opsel    = (i_alu_ctrl_opsel == 4'b0000)? 3'b000 :    //ADD
+                        (i_alu_ctrl_opsel == 4'b0001)? 3'b000 :    //SUB   
+                        (i_alu_ctrl_opsel == 4'b0010)? 3'b111 :    //AND   
+                        (i_alu_ctrl_opsel == 4'b0011)? 3'b110 :    //OR   
+                        (i_alu_ctrl_opsel == 4'b0100)? 3'b100 :    //XOR   
+                        (i_alu_ctrl_opsel == 4'b0101)? 3'b001 :    //SLL   
+                        (i_alu_ctrl_opsel == 4'b0110)? 3'b101 :    //SRL   
+                        (i_alu_ctrl_opsel == 4'b0111)? 3'b101 :    //SRA   
+                        (i_alu_ctrl_opsel == 4'b1000)? 3'b010 :    //SLT   - 010 and 011
+                        (i_alu_ctrl_opsel == 4'b1001)? 3'b010 :    //SLTU   
+                        (i_alu_ctrl_opsel == 4'b1010)? 3'b011 :    //PASS_B - LUI   - Can I use 011 for LUI?
+                        3'bXXX; //Don't care                               
+    ////////////////////////////////////////////
+    /////////////////OUTPUTS////////////////////
+    ////////////////////////////////////////////
+    assign o_alu_Zero  = o_eq | o_slt | o_sne | o_sge ; 
+endmodule
+
+
+module alu_control( input  wire [1:0]  i_clu_alu_op,
+                    input  wire [31:0] i_instr_mem_inst,
+                    output wire o_unsigned, //Should be removed - Sreeraj and keep it at ALU Wrapper itself based on SLTU opcode status.
+                    output wire [3:0]  o_alu_control
+                    );
+
+wire [5:0] op_code;
+wire [3:0] decode;
+wire [2:0] funct3;
+wire [6:0] funct7;
+
+assign funct3 = i_instr_mem_inst[14:12];
+assign funct7 = i_instr_mem_inst[31:25];
+assign op_code = i_instr_mem_inst[6:0];
+assign o_unsigned = (((funct3 == 3'b011) && (op_code == 7'b0110011) || (op_code == 7'0010011)) || 
+                     ((op_code == 7'b0000011) && (funct3 == 3'b100 || funct3 == 3'b101)) ||
+                     ((op_code == 7'b1100011) && (funct3 == 3'b110 || funct3 == 3'b111))) ?
+                    1'b1: 1'b0; // Sets to 1 if its unsigned
+
+assign decode = (op_code == 7'b0110011) ? 4'b0000: // R type
+                (op_code == 7'b0010011) ? 4'b0001: // I type
+                (op_code == 7'b0110111) ? 4'b0010: // LUI
+                (op_code == 7'b0010111) ? 4'b0011: // AUIPC
+                (op_code == 7'b0000011) ? 4'b0100: // LOAD
+                (op_code == 7'b0100011) ? 4'b0101: // STORE
+                (op_code == 7'b1100011) ? 4'b0110: // BRANCH
+                (op_code == 7'b1100111) ? 4'b0111: // JALR
+                (op_code == 7'b1101111) ? 4'b1000; // JAL
+
+assign o_alu_control = 
+    (i_clu_alu_op == 2'b00) ? 4'b0000 : // Forced Addition (S, U, J)
+    (i_clu_alu_op == 2'b01) ? 4'b0001 : // Forced Subtraction (B) - BEQ , BNE
+    (i_clu_alu_op == 2'b10) ? (
+        (decode == 4'b0000) ? ( // R type
+            (funct3 == 3'b000) ? ((funct7[5]) ? 4'b0001 : 4'b0000) : // sub/add
+            (funct3 == 3'b001) ? 4'b0101 : // sll
+            (funct3 == 3'b010) ? 4'b1000 : // slt //BLT
+            (funct3 == 3'b011) ? 4'b1001 : // sltu
+            (funct3 == 3'b100) ? 4'b0100 : // xor
+            (funct3 == 3'b101) ? ((funct7[5]) ? 4'b0111 : 4'b0110) : // sra/srl
+            (funct3 == 3'b110) ? 4'b0011 : // or
+            (funct3 == 3'b111) ? 4'b0010 : // and
+            4'b0000
+        ) : 
+        (decode == 4'b0001) ? ( // I type
+            (funct3 == 3'b000) ? 4'b0000 : // addi
+            (funct3 == 3'b001) ? 4'b0101 : // slli
+            (funct3 == 3'b010) ? 4'b1000 : // slti
+            (funct3 == 3'b011) ? 4'b1001 : // sltiu
+            (funct3 == 3'b100) ? 4'b0100 : // xori
+            (funct3 == 3'b101) ? ((funct7[5]) ? 4'b0111 : 4'b0110) : // srai/srli
+            (funct3 == 3'b110) ? 4'b0011 : // ori
+            (funct3 == 3'b111) ? 4'b0010 : // andi
+            4'b0000
+        ) :
+        (decode == 4'b0100) ? 4'b0000 : // Load (add base + offset)
+        4'b0000
+    ) :
+    (i_clu_alu_op == 2'b11) ? 4'bxxxx : 4'b0000;
+
+endmodule
+
+module alu_wrapper (
+    // 4 bit input from ALU Control block
+    input  wire [ 3:0] i_alu_ctrl_opsel,
+    // First 32-bit input operand.
+    input  wire [31:0] i_rf_op1,
+    // Second 32-bit input operand.
+    input  wire [31:0] i_rf_op2,
+    //Aluctrl unsigned chk input.
+    input wire i_aluctrl_unsigned,
+    // 32-bit output result. Any carry out (from addition) should be ignored.
+    output wire [31:0] o_alu_result,
+    // Equality result. This is used downstream to determine if a
+    // branch should be taken. (case of BLT/U , BGE/U , BNE , BEQ)
+    output wire        o_alu_Zero
+);
+    wire [ 2:0] i_opsel;
+    wire        i_sub;
+    wire        i_unsigned;
+    wire        i_arith;
+    wire        o_eq;
+    wire        o_slt;  // BLT and BLTU
+    wire        o_sne;  // BNE
+    wire        o_sge;  // BGE and BGEU
+    alu alu_inst(
+        .i_opsel(i_opsel),
+        .i_sub(i_sub),
+        .i_unsigned(i_aluctrl_unsigned),
+        .i_arith(i_arith),
+        .i_op1(i_rf_op1),
+        .i_op2(i_rf_op2),
+        .o_result(o_alu_result),
+        .o_eq(o_eq),
+        .o_slt(o_slt),
+        .o_sne(o_sne),
+        .o_sge(o_sge)
+    );
+    ////////////////////////////////////////////
+    //////////INPUTS TO THE INSIDE ALU//////////
+    ////////////////////////////////////////////
+    //assign i_unsigned = (i_alu_ctrl_opsel == 4'b1001)? 1'b1 : 1'b0;
+
+    assign i_arith    = (i_alu_ctrl_opsel == 4'b0111)? 1'b1 : 1'b0;
+    assign i_sub      = (i_alu_ctrl_opsel == 4'b0001)? 1'b1 : 1'b0;
+    assign i_opsel    = (i_alu_ctrl_opsel == 4'b0000)? 3'b000 :    //ADD
+                        (i_alu_ctrl_opsel == 4'b0001)? 3'b000 :    //SUB   
+                        (i_alu_ctrl_opsel == 4'b0010)? 3'b111 :    //AND   
+                        (i_alu_ctrl_opsel == 4'b0011)? 3'b110 :    //OR   
+                        (i_alu_ctrl_opsel == 4'b0100)? 3'b100 :    //XOR   
+                        (i_alu_ctrl_opsel == 4'b0101)? 3'b001 :    //SLL   
+                        (i_alu_ctrl_opsel == 4'b0110)? 3'b101 :    //SRL   
+                        (i_alu_ctrl_opsel == 4'b0111)? 3'b101 :    //SRA   
+                        (i_alu_ctrl_opsel == 4'b1000)? 3'b010 :    //SLT   - 010 and 011
+                        (i_alu_ctrl_opsel == 4'b1001)? 3'b010 :    //SLTU   
+                        (i_alu_ctrl_opsel == 4'b1010)? 3'b011 :    //PASS_B - LUI   - Can I use 011 for LUI?
+                        3'bXXX; //Don't care                               
+    ////////////////////////////////////////////
+    /////////////////OUTPUTS////////////////////
+    ////////////////////////////////////////////
+    assign o_alu_Zero  = o_eq | o_slt | o_sne | o_sge ; 
+endmodule
+
+
 
 module alu_control( input  wire [1:0]  i_clu_alu_op,
                     input  wire [31:0] i_instr_mem_inst,
@@ -198,3 +446,5 @@ assign o_alu_control =
     (i_clu_alu_op == 2'b11) ? 4'bxxxx : 4'b0000;
 
 endmodule
+
+`default_nettype wire
