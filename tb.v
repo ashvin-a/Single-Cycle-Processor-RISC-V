@@ -25,6 +25,7 @@ module hart_tb ();
         .i_rst        (rst),
         .o_imem_raddr (imem_raddr),
         .i_imem_rdata (imem_rdata),
+        //.i_imem_rdata (32'h00618113),
         .o_dmem_addr  (dmem_addr),
         .o_dmem_ren   (dmem_ren),
         .o_dmem_wen   (dmem_wen),
@@ -89,8 +90,80 @@ module hart_tb ();
         @(negedge clk); rst = 1;
         @(negedge clk); rst = 0;
 
+        // imem_rdata = 32'h00008093;
+        // repeat (1) @(posedge clk);
 
-        repeat (1000) @(posedge clk);
+        // imem_rdata = 32'h00010113;
+        // repeat (1) @(posedge clk);
+
+        // imem_rdata = 32'h00208f33;
+        // repeat (1) @(posedge clk);
+
+        // imem_rdata = 32'h000e8e93;
+        // repeat (1) @(posedge clk);
+
+        // imem_rdata = 32'h00218193;
+        // repeat (1) @(posedge clk);
+
+        // imem_rdata = 32'h01df1863;
+        // repeat (1) @(posedge clk);
+
+        repeat (10) @(posedge clk);
+
+imem_rdata = 32'h00000093;
+        repeat (1) @(posedge clk);
+
+imem_rdata = 32'h00000113;
+        repeat (1) @(posedge clk);
+
+imem_rdata = 32'h00208f33;
+        repeat (1) @(posedge clk);
+
+imem_rdata = 32'h00000e93;
+        repeat (1) @(posedge clk);
+
+imem_rdata = 32'h00200193;
+        repeat (1) @(posedge clk);
+
+imem_rdata = 32'h1fdf1a63;
+        repeat (1) @(posedge clk);
+
+imem_rdata = 32'h00100093;
+        repeat (1) @(posedge clk);
+
+imem_rdata = 32'h00100113;
+        repeat (1) @(posedge clk);
+
+imem_rdata = 32'h00208f33;
+        repeat (1) @(posedge clk);
+
+imem_rdata = 32'h00200e93;
+        repeat (1) @(posedge clk);
+
+imem_rdata = 32'h00300193;
+        repeat (1) @(posedge clk);
+
+imem_rdata = 32'h1ddf1e63;
+        repeat (1) @(posedge clk);
+
+imem_rdata = 32'h00300093;
+        repeat (1) @(posedge clk);
+
+imem_rdata = 32'h00700113;
+        repeat (1) @(posedge clk);
+
+imem_rdata = 32'h00208f33;
+        repeat (1) @(posedge clk);
+
+imem_rdata = 32'h00a00e93;
+        repeat (1) @(posedge clk);
+
+imem_rdata = 32'h00400193;
+        repeat (1) @(posedge clk);
+
+imem_rdata = 32'h1ddf1263;
+        repeat (10) @(posedge clk);
+
 
         $display("Cycle  PC        Inst     rs1            rs2            [rd, load, store]");
         cycles = 0;
@@ -118,7 +191,7 @@ module hart_tb ();
 
         $display("Program halted after %d cycles.", cycles);
         //$display("r[a0]=%08h (%d)", dut.rf.mem[10], dut.rf.mem[10]);
-        $finish;
+        $stop;
     end
 
     always
