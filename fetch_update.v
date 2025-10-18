@@ -21,9 +21,8 @@ module fetch (
     wire [31:0]pc_imm_mux_val;
     assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? ({{i_imm_o_immediate[30:0],1'b0}}) : (PC + 4) ; 
     assign o_instr_mem_rd_addr = PC;
-    //[Q1] : What Value to be initialized for PC?
-    always @(posedge clk or negedge rst_n) begin
-        if(!rst_n) begin
+    always @(posedge clk) begin
+        if(rst_n) begin
             PC <= 0; // Can it be 0?
         end
         else begin
