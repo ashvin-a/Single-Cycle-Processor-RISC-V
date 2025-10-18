@@ -196,7 +196,7 @@ module alu_wrapper (
     alu alu_inst(
         .i_opsel(i_opsel),
         .i_sub(i_sub),
-        .i_unsigned(i_aluctrl_unsigned),
+        .i_unsigned(i_unsigned),
         .i_arith(i_arith),
         .i_op1(i_rf_op1),
         .i_op2(i_rf_op2),
