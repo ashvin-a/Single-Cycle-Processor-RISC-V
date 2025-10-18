@@ -1,3 +1,6 @@
+//Retire Valid has to come from PC/fetch - infact i guess all of them
+//To implement the JAL JALR instructions
+//To connect the RETIRE TRACE OUT
 //NEED EXTRA MUX to control the ZERO EXTEND AND SIGN EXTEND ON THE ALU OUT DATA FOR I' AND S Instruction type - lb , lh , lbu , lhu - On the data coming out of the DATA MEM. This SIGN EXT is controlled by the Main control signal (NEW)
 //o_sign_or_zero_ext_data_mux - Can i avoid this 3 bit mux sel signal by any chance - Can i use func3 instead?
 // BGE has greater than or equal to condition - Make sure it is covered??
@@ -16,12 +19,10 @@ module fetch (
     output reg  [31:0] PC
 );
     wire [31:0]pc_imm_mux_val;
-    ///[Q] : Should it be o_slt or o_eq?
-    assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? (PC + {{i_imm_o_immediate[31:1],1'b0}}) : (PC + 4) ; 
+    assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? ({{i_imm_o_immediate[30:0],1'b0}}) : (PC + 4) ; 
     assign o_instr_mem_rd_addr = PC;
-    //[Q1] : What Value to be initialized for PC?
-    always @(posedge clk or negedge rst_n) begin
-        if(!rst_n) begin
+    always @(posedge clk) begin
+        if(rst_n) begin
             PC <= 0; // Can it be 0?
         end
         else begin
@@ -47,6 +48,42 @@ module control_unit(
     output wire [2:0]o_sign_or_zero_ext_data_mux // This signal will go to 5:1 MUX which will choose between ZERO extend , SIGN EXTEND or NO EXTEND on the read data from the datamem - ONLY FOR LOAD
 );
 
+assign o_clu_Branch =   (i_clu_inst[6:0] == 7'b110_0011); // Branch
+
+assign o_clu_MemRead =  (i_clu_inst[6:0] == 7'b000_0011); // Load
+
+assign o_clu_MemtoReg = (i_clu_inst[6:0] == 7'b000_0011) ? 1'b1 : // Load
+                        (i_clu_inst[6:0] == 7'b110_0011) ? 1'bx : // Store
+                        (i_clu_inst[6:0] == 7'b010_0011) ? 1'bx : // Branch
+                        1'b0;
+
+assign o_clu_MemWrite = (i_clu_inst[6:0] == 7'b010_0011);   // Store
+
+assign o_clu_ALUSrc =   (i_clu_inst[6:0] == 7'b001_0011) || // I type
+                        (i_clu_inst[6:0] == 7'b011_0111) || // LUI
+                        (i_clu_inst[6:0] == 7'b001_0111) || // AUIPC
+                        (i_clu_inst[6:0] == 7'b000_0011) || // Load
+                        (i_clu_inst[6:0] == 7'b010_0011);   // Store
+
+assign o_clu_RegWrite = (i_clu_inst[6:0] == 7'b011_0011) || // R type
+                        (i_clu_inst[6:0] == 7'b001_0011) || // I type
+                        (i_clu_inst[6:0] == 7'b011_0111) || // LUI
+                        (i_clu_inst[6:0] == 7'b001_0111) || // AUIPC
+                        (i_clu_inst[6:0] == 7'b000_0011);   // Load
+
+assign o_clu_dmem_mask = ((i_clu_inst[6:0] == 7'b000_0011) || (i_clu_inst[6:0] == 7'b010_0011)) ? ( // Check for Load/Store instruction
+                           (i_clu_inst[14:12] == 3'b000)? 4'b0001  : // Byte
+                           (i_clu_inst[14:12] == 3'b001)? 4'b0011  : // Half
+                           (i_clu_inst[14:12] == 3'b010)? 4'b1111  : // Word
+                           (i_clu_inst[14:12] == 3'b100)? 4'b0001  : // Byte - unsigned - only for load
+                           (i_clu_inst[14:12] == 3'b101)? 4'b0011  : // Half - unsigned - only for load
+                           4'b1111) : 
+                        4'b1111;
+
+assign o_clu_ALUOp =    ((i_clu_inst[6:0] == 7'b011_0011) || (i_clu_inst[6:0] == 7'b001_0011)) ?  2'b10 : // R and I type 
+                        (i_clu_inst[6:0] == 7'b110_0011) ? 2'b01 : //Branch
+                        2'b00;
+
 assign o_clu_branch_instr_alu_sel  =    (i_clu_inst[6:0] == 7'b110_0011)? (      //Check for BRANCH Instruction type
                                         (i_clu_inst[14:12] == 3'b000)? 2'b00  : //beq
                                         (i_clu_inst[14:12] == 3'b001)? 2'b01  : //bne
@@ -55,6 +92,19 @@ assign o_clu_branch_instr_alu_sel  =    (i_clu_inst[6:0] == 7'b110_0011)? (     
                                         (i_clu_inst[14:12] == 3'b110)? 2'b10  : //bltu
                                         (i_clu_inst[14:12] == 3'b111)? 2'b11  : 2'bxx) : //bgeu
                                         2'bxx;
+
+assign o_clu_lui_auipc_mux_sel =    (i_clu_inst[6:0] == 7'b011_0111) ? 2'b01 : // LUI
+                                    (i_clu_inst[6:0] == 7'b001_0111) ? 2'b10 : // AUICP
+                                    2'b00; // Register File
+
+assign o_sign_or_zero_ext_data_mux =    (i_clu_inst[6:0] == 7'b000_0011) ? ( // Check for Load instruction
+                                        (i_clu_inst[14:12] == 3'b000) ? 3'b001 : // lb
+                                        (i_clu_inst[14:12] == 3'b001) ? 3'b011 : // lh
+                                        (i_clu_inst[14:12] == 3'b001) ? 3'b100 : // lw
+                                        (i_clu_inst[14:12] == 3'b001) ? 3'b000 : // lbu
+                                        (i_clu_inst[14:12] == 3'b001) ? 3'b010 : // lhu
+                                        3'bxxx) :
+                                        3'bxxx; 
 
 endmodule
 
@@ -147,7 +197,7 @@ module alu_wrapper (
     alu alu_inst(
         .i_opsel(i_opsel),
         .i_sub(i_sub),
-        .i_unsigned(i_aluctrl_unsigned),
+        .i_unsigned(i_unsigned),
         .i_arith(i_arith),
         .i_op1(i_rf_op1),
         .i_op2(i_rf_op2),
@@ -179,8 +229,8 @@ module alu_wrapper (
     ////////////////////////////////////////////
     assign o_alu_Zero = (i_clu_branch_instr_alu_sel == 2'b00) ?   o_eq :  //BEQ
                         (i_clu_branch_instr_alu_sel == 2'b01) ?  ~o_eq :  //BNE
-                        (i_clu_branch_instr_alu_sel == 2'b10) ?  o_slt :  //BLT / BLTU - Should I give an and condition to (i_alu_ctrl_opsel == 4'b1001) for BLTU ? - No - Taken care by i_unsigned inside ALU
-                        ~o_slt;                                           //BGE / BGEU - Should I give an and condition to (i_alu_ctrl_opsel == 4'b1001) for BGEU ? - No - Taken care by i_unsigned inside ALU
+                        (i_clu_branch_instr_alu_sel == 2'b10) ?  o_slt :  //BLT / BLTU 
+                        ~o_slt;                                           //BGE / BGEU
                         
 endmodule
 
@@ -363,7 +413,6 @@ wire [31:0] i_dmem_alu_muxout_data;
 wire [31:0] o_rs1_rdata;
 wire [31:0] rs2_rdata_imm_mux_data;
 wire [3:0] o_alu_control_sel;
-wire o_unsigned;
 wire t_clu_ALUSrc, t_clu_MemtoReg, i_clu_branch;
 wire [31:0] PC_current_val;
 wire [31:0] t_lui_auipc_mux_data;
@@ -373,6 +422,21 @@ wire [1:0] t_clu_branch_instr_alu_sel;
 wire [1:0]t_clu_alu_op;
 wire [31:0] i_dmem_rdata_sign_or_zero_ext_mux_data;
 wire t_rd_wen;
+
+//temporary assignments
+assign o_retire_halt      = 0;
+assign o_retire_valid     = 1;
+assign o_retire_inst      =   i_imem_rdata;         
+assign o_retire_trap      =   0; //Temporary assignment - Need to be modified         
+assign o_retire_rs1_raddr =   i_imem_rdata[19:15];         
+assign o_retire_rs1_rdata =   o_rs1_rdata;         
+assign o_retire_rs2_raddr =   i_imem_rdata[24:20];         
+assign o_retire_rs2_rdata =   t_rs2_rdata;         
+assign o_retire_rd_waddr  =   i_imem_rdata[11:7];         
+assign o_retire_rd_wdata  =   i_dmem_alu_muxout_data;        
+assign o_retire_pc        =   PC_current_val;         
+assign o_retire_next_pc   =   PC_current_val + 4;   //Need to be modified based on Branch and Jump instructions   
+
 
 assign i_imm_format =   
     (i_imem_rdata[6:0] == 7'b0110011)? 6'b000001 : // R
@@ -384,6 +448,7 @@ assign i_imm_format =
     (i_imem_rdata[6:0] == 7'b1101111)? 6'b100000 : // J
     6'bXXXXXX;
 
+assign o_dmem_wdata = t_rs2_rdata;
 // Register File
 rf #(.BYPASS_EN(0)) reg_inst(
     .i_clk(i_clk),
