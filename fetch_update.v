@@ -406,10 +406,6 @@ module hart #(
 `endif
 );
 
-//temporary assignments
-assign o_retire_halt = 0;
-assign o_retire_valid = 1;
-
 // Immediate format decoding
 wire [5:0] i_imm_format;
 wire [31:0] t_rs2_rdata;
@@ -426,6 +422,21 @@ wire [1:0] t_clu_branch_instr_alu_sel;
 wire [1:0]t_clu_alu_op;
 wire [31:0] i_dmem_rdata_sign_or_zero_ext_mux_data;
 wire t_rd_wen;
+
+//temporary assignments
+assign o_retire_halt      = 0;
+assign o_retire_valid     = 1;
+assign o_retire_inst      =   i_imem_rdata;         
+assign o_retire_trap      =   0; //Temporary assignment - Need to be modified         
+assign o_retire_rs1_raddr =   i_imem_rdata[19:15];         
+assign o_retire_rs1_rdata =   o_rs1_rdata;         
+assign o_retire_rs2_raddr =   i_imem_rdata[24:20];         
+assign o_retire_rs2_rdata =   t_rs2_rdata;         
+assign o_retire_rd_waddr  =   i_imem_rdata[11:7];         
+assign o_retire_rd_wdata  =   i_dmem_alu_muxout_data;        
+assign o_retire_pc        =   PC_current_val;         
+assign o_retire_next_pc   =   PC_current_val + 4;   //Need to be modified based on Branch and Jump instructions   
+
 
 assign i_imm_format =   
     (i_imem_rdata[6:0] == 7'b0110011)? 6'b000001 : // R
