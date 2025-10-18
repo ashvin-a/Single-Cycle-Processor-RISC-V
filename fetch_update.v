@@ -405,6 +405,10 @@ module hart #(
 `endif
 );
 
+//temporary assignments
+assign o_retire_halt = 0;
+assign o_retire_valid = 1;
+
 // Immediate format decoding
 wire [5:0] i_imm_format;
 wire [31:0] t_rs2_rdata;
@@ -412,7 +416,6 @@ wire [31:0] i_dmem_alu_muxout_data;
 wire [31:0] o_rs1_rdata;
 wire [31:0] rs2_rdata_imm_mux_data;
 wire [3:0] o_alu_control_sel;
-wire o_unsigned;
 wire t_clu_ALUSrc, t_clu_MemtoReg, i_clu_branch;
 wire [31:0] PC_current_val;
 wire [31:0] t_lui_auipc_mux_data;
