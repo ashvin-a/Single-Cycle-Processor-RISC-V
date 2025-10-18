@@ -96,9 +96,14 @@ assign o_clu_lui_auipc_mux_sel =    (i_clu_inst[6:0] == 7'b011_0111) ? 2'b01 : /
                                     (i_clu_inst[6:0] == 7'b001_0111) ? 2'b10 : // AUICP
                                     2'b00; // Register File
 
-assign o_sign_or_zero_ext_data_mux =    ((i_clu_inst[6:0] == 7'b000_0011) && ((i_clu_inst[14:12] == 3'b000) || (i_clu_inst[14:12] == 3'b001) || (i_clu_inst[14:12] == 3'b010))) ? 1'b0 :
-                                        ((i_clu_inst[6:0] == 7'b000_0011) && ((i_clu_inst[14:12] == 3'b100) || (i_clu_inst[14:12] == 3'b101) )) ? 1'b1 :
-                                        1'bx;
+assign o_sign_or_zero_ext_data_mux =    (i_clu_inst[6:0] == 7'b000_0011) ? ( // Check for Load instruction
+                                        (i_clu_inst[14:12] == 3'b000) ? 3'b001 : // lb
+                                        (i_clu_inst[14:12] == 3'b001) ? 3'b011 : // lh
+                                        (i_clu_inst[14:12] == 3'b001) ? 3'b100 : // lw
+                                        (i_clu_inst[14:12] == 3'b001) ? 3'b000 : // lbu
+                                        (i_clu_inst[14:12] == 3'b001) ? 3'b010 : // lhu
+                                        3'bxxx) :
+                                        3'bxxx; 
 
 endmodule
 
