@@ -80,100 +80,85 @@ module hart_tb ();
     integer cycles;
     initial begin
         clk = 0;
-
         // Load the test program into memory at address 0.
         $display("Loading program.");
        // $readmemh("program.mem", imem);
+        imem[0] = 8'hb7;
+        imem[1] = 8'h30;
+        imem[2] = 8'h00;
+        imem[3] = 8'h00;
+
+        imem[4] = 8'h37;
+        imem[5] = 8'h71;
+        imem[6] = 8'h00;
+        imem[7] = 8'h00;
+
+        imem[8] = 8'h33;
+        imem[9] = 8'h8f;
+        imem[10] = 8'h20;
+        imem[11] = 8'h00;
+
+        imem[12] = 8'hb7;
+        imem[13] = 8'hae;
+        imem[14] = 8'h00;
+        imem[15] = 8'h00;
+
+      //  imem[16] = 8'hb7;
+      //  imem[17] = 8'h41;
+      //  imem[18] = 8'h00;
+      //  imem[19] = 8'h00;
+
+        imem[16] = 8'h63;
+        imem[17] = 8'h12;
+        imem[18] = 8'hdf;
+        imem[19] = 8'h01;
+
+        imem[20] = 8'hb7;
+        imem[21] = 8'h42;
+        imem[22] = 8'h00;
+        imem[23] = 8'h00;
+
+        imem[24] = 8'h37;
+        imem[25] = 8'h53;
+        imem[26] = 8'h00;
+        imem[27] = 8'h00;
+
+        imem[28] = 8'h33;
+        imem[29] = 8'h8e;
+        imem[30] = 8'h62;
+        imem[31] = 8'h00;
+
+        imem[32] = 8'hb7;
+        imem[33] = 8'h9d;
+        imem[34] = 8'h00;
+        imem[35] = 8'h00;
+
+        imem[36] = 8'h63;
+        imem[37] = 8'h02;
+        imem[38] = 8'hbe;
+        imem[39] = 8'h01;
+
+// 0x000042b7
+// 0x00004337
+// 0x00628e33
+// 0x00009db7
+// 0x01be0263
 
         // Reset the dut.
         $display("Resetting hart.");
         @(negedge clk); rst = 1;
         @(negedge clk); rst = 0;
 
-        // imem_rdata = 32'h00008093;
-        // repeat (1) @(posedge clk);
-
-        // imem_rdata = 32'h00010113;
-        // repeat (1) @(posedge clk);
-
-        // imem_rdata = 32'h00208f33;
-        // repeat (1) @(posedge clk);
-
-        // imem_rdata = 32'h000e8e93;
-        // repeat (1) @(posedge clk);
-
-        // imem_rdata = 32'h00218193;
-        // repeat (1) @(posedge clk);
-
-        // imem_rdata = 32'h01df1863;
-        // repeat (1) @(posedge clk);
-
-        repeat (10) @(posedge clk);
-
-imem_rdata = 32'h00000093;
-        repeat (1) @(posedge clk);
-
-imem_rdata = 32'h00000113;
-        repeat (1) @(posedge clk);
-
-imem_rdata = 32'h00208f33;
-        repeat (1) @(posedge clk);
-
-imem_rdata = 32'h00000e93;
-        repeat (1) @(posedge clk);
-
-imem_rdata = 32'h00200193;
-        repeat (1) @(posedge clk);
-
-imem_rdata = 32'h1fdf1a63;
-        repeat (1) @(posedge clk);
-
-imem_rdata = 32'h00100093;
-        repeat (1) @(posedge clk);
-
-imem_rdata = 32'h00100113;
-        repeat (1) @(posedge clk);
-
-imem_rdata = 32'h00208f33;
-        repeat (1) @(posedge clk);
-
-imem_rdata = 32'h00200e93;
-        repeat (1) @(posedge clk);
-
-imem_rdata = 32'h00300193;
-        repeat (1) @(posedge clk);
-
-imem_rdata = 32'h1ddf1e63;
-        repeat (1) @(posedge clk);
-
-imem_rdata = 32'h00300093;
-        repeat (1) @(posedge clk);
-
-imem_rdata = 32'h00700113;
-        repeat (1) @(posedge clk);
-
-imem_rdata = 32'h00208f33;
-        repeat (1) @(posedge clk);
-
-imem_rdata = 32'h00a00e93;
-        repeat (1) @(posedge clk);
-
-imem_rdata = 32'h00400193;
-        repeat (1) @(posedge clk);
-
-imem_rdata = 32'h1ddf1263;
-        repeat (10) @(posedge clk);
-
-
         $display("Cycle  PC        Inst     rs1            rs2            [rd, load, store]");
         cycles = 0;
-        while (!halt) begin
+        //while (!halt ) begin
+        while (cycles != 100) begin
             @(posedge clk);
             cycles = cycles + 1;
 
             if (valid) begin
                 // Base information for all instructions.
-                $write("%05d [%08h] %08h r[%d]=%08h r[%d]=%08h", cycles, pc, inst, rs1_raddr, rs1_rdata, rs2_raddr, rs2_rdata);
+                $write("%05d [%08h] %08h r[%d]=%08h r[%d]=%08h at time = %0t", cycles, pc, inst, rs1_raddr, rs1_rdata, rs2_raddr, rs2_rdata,$time);
                 // Only display write information for instructions that write.
                 if (rd_waddr != 5'd0)
                     $write(" w[%d]=%08h", rd_waddr, rd_wdata);
@@ -193,7 +178,6 @@ imem_rdata = 32'h1ddf1263;
         //$display("r[a0]=%08h (%d)", dut.rf.mem[10], dut.rf.mem[10]);
         $stop;
     end
-
     always
         #5 clk = ~clk;
 endmodule
