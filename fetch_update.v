@@ -71,11 +71,11 @@ assign o_clu_RegWrite = (i_clu_inst[6:0] == 7'b011_0011) || // R type
                         (i_clu_inst[6:0] == 7'b000_0011);   // Load
 
 assign o_clu_dmem_mask = ((i_clu_inst[6:0] == 7'b000_0011) || (i_clu_inst[6:0] == 7'b010_0011)) ? ( // Check for Load/Store instruction
-                           (i_clu_inst[14:12] == 3'b000)? 4'b0001  : 
-                           (i_clu_inst[14:12] == 3'b001)? 4'b0011  :
-                           (i_clu_inst[14:12] == 3'b010)? 4'b1111  :
-                           (i_clu_inst[14:12] == 3'b100)? 4'b0001  :
-                           (i_clu_inst[14:12] == 3'b101)? 4'b0011  :
+                           (i_clu_inst[14:12] == 3'b000)? 4'b0001  : // Byte
+                           (i_clu_inst[14:12] == 3'b001)? 4'b0011  : // Half
+                           (i_clu_inst[14:12] == 3'b010)? 4'b1111  : // Word
+                           (i_clu_inst[14:12] == 3'b100)? 4'b0001  : // Byte - unsigned - only for load
+                           (i_clu_inst[14:12] == 3'b101)? 4'b0011  : // Half - unsigned - only for load
                            4'b1111) : 
                         4'b1111;
 
@@ -92,9 +92,9 @@ assign o_clu_branch_instr_alu_sel  =    (i_clu_inst[6:0] == 7'b110_0011)? (     
                                         (i_clu_inst[14:12] == 3'b111)? 2'b11  : 2'bxx) : //bgeu
                                         2'bxx;
 
-assign o_clu_lui_auipc_mux_sel =    (i_clu_inst[6:0] == 7'b011_0111) ? 2'b01 :
-                                    (i_clu_inst[6:0] == 7'b001_0111) ? 2'b10 : 
-                                    2'b00;
+assign o_clu_lui_auipc_mux_sel =    (i_clu_inst[6:0] == 7'b011_0111) ? 2'b01 : // LUI
+                                    (i_clu_inst[6:0] == 7'b001_0111) ? 2'b10 : // AUICP
+                                    2'b00; // Register File
 
 assign o_sign_or_zero_ext_data_mux =    ((i_clu_inst[6:0] == 7'b000_0011) && ((i_clu_inst[14:12] == 3'b000) || (i_clu_inst[14:12] == 3'b001) || (i_clu_inst[14:12] == 3'b010))) ? 1'b0 :
                                         ((i_clu_inst[6:0] == 7'b000_0011) && ((i_clu_inst[14:12] == 3'b100) || (i_clu_inst[14:12] == 3'b101) )) ? 1'b1 :
@@ -223,8 +223,8 @@ module alu_wrapper (
     ////////////////////////////////////////////
     assign o_alu_Zero = (i_clu_branch_instr_alu_sel == 2'b00) ?   o_eq :  //BEQ
                         (i_clu_branch_instr_alu_sel == 2'b01) ?  ~o_eq :  //BNE
-                        (i_clu_branch_instr_alu_sel == 2'b10) ?  o_slt :  //BLT / BLTU - Should I give an and condition to (i_alu_ctrl_opsel == 4'b1001) for BLTU ? - No - Taken care by i_unsigned inside ALU
-                        ~o_slt;                                           //BGE / BGEU - Should I give an and condition to (i_alu_ctrl_opsel == 4'b1001) for BGEU ? - No - Taken care by i_unsigned inside ALU
+                        (i_clu_branch_instr_alu_sel == 2'b10) ?  o_slt :  //BLT / BLTU 
+                        ~o_slt;                                           //BGE / BGEU
                         
 endmodule
 
