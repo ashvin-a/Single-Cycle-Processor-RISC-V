@@ -13,6 +13,7 @@ module fetch (
     input  wire clk,
     input  wire rst_n,
     input  wire i_clu_branch,
+    input  wire i_clu_halt,
     input  wire i_alu_o_Zero,
     input  wire [31:0]i_imm_o_immediate,
     output wire [31:0]o_instr_mem_rd_addr, // read address is 32 bits and not 5 bits
@@ -26,7 +27,8 @@ module fetch (
             PC <= 0; // Can it be 0?
         end
         else begin
-            PC <= pc_imm_mux_val;
+            if (!i_clu_halt)
+                PC <= pc_imm_mux_val;
         end
     end
 endmodule
@@ -36,6 +38,7 @@ module control_unit(
     input  wire rst_n,
     input  wire [31:0] i_clu_inst,
     output wire o_clu_Branch,
+    output wire o_clu_halt,
     output wire o_clu_MemRead,
     output wire o_clu_MemtoReg,
     output wire [1:0]o_clu_ALUOp,
@@ -49,6 +52,8 @@ module control_unit(
 );
 
 assign o_clu_Branch =   (i_clu_inst[6:0] == 7'b110_0011); // Branch
+
+assign o_clu_halt = (i_clu_inst[6:0] == 7'b111_0011); // Halt
 
 assign o_clu_MemRead =  (i_clu_inst[6:0] == 7'b000_0011); // Load
 
@@ -414,6 +419,7 @@ wire [31:0] o_rs1_rdata;
 wire [31:0] rs2_rdata_imm_mux_data;
 wire [3:0] o_alu_control_sel;
 wire t_clu_ALUSrc, t_clu_MemtoReg, i_clu_branch;
+wire t_clu_halt;
 wire [31:0] PC_current_val;
 wire [31:0] t_lui_auipc_mux_data;
 wire t_clu_lui_auipc_mux_sel;
@@ -424,7 +430,7 @@ wire [31:0] i_dmem_rdata_sign_or_zero_ext_mux_data;
 wire t_rd_wen;
 
 //temporary assignments
-assign o_retire_halt      = 0;
+assign o_retire_halt      = t_clu_halt;
 assign o_retire_valid     = 1;
 assign o_retire_inst      =   i_imem_rdata;         
 assign o_retire_trap      =   0; //Temporary assignment - Need to be modified         
@@ -475,6 +481,7 @@ fetch fetch_inst(
     .clk(i_clk),
     .rst_n(i_rst),
     .i_clu_branch(i_clu_branch),
+    .i_clu_halt(t_clu_halt),
     .i_alu_o_Zero(i_alu_o_Zero),
     .i_imm_o_immediate(t_immediate_out_data),
     .PC(PC_current_val),
@@ -519,6 +526,7 @@ control_unit control_unit_inst(
     .rst_n(i_rst),
     .i_clu_inst(i_imem_rdata),
     .o_clu_Branch(i_clu_branch),
+    .o_clu_halt(t_clu_halt),
     .o_clu_MemRead(o_dmem_ren),
     .o_clu_MemtoReg(t_clu_MemtoReg),
     .o_clu_ALUOp(t_clu_alu_op),
