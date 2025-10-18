@@ -436,6 +436,7 @@ assign i_imm_format =
     (i_imem_rdata[6:0] == 7'b1101111)? 6'b100000 : // J
     6'bXXXXXX;
 
+assign o_dmem_wdata = t_rs2_rdata;
 // Register File
 rf #(.BYPASS_EN(0)) reg_inst(
     .i_clk(i_clk),
