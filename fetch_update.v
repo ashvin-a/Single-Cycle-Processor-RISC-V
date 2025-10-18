@@ -80,7 +80,7 @@ assign o_clu_dmem_mask = ((i_clu_inst[6:0] == 7'b000_0011) || (i_clu_inst[6:0] =
                         4'b1111;
 
 assign o_clu_ALUOp =    ((i_clu_inst[6:0] == 7'b011_0011) || (i_clu_inst[6:0] == 7'b001_0011)) ?  2'b10 : // R and I type 
-                        (i_clu_inst[6:0] == 7'b110_0011) ? 2'b10 : //Branch
+                        (i_clu_inst[6:0] == 7'b110_0011) ? 2'b01 : //Branch
                         2'b00;
 
 assign o_clu_branch_instr_alu_sel  =    (i_clu_inst[6:0] == 7'b110_0011)? (      //Check for BRANCH Instruction type
