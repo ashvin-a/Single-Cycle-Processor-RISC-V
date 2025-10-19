@@ -1,5 +1,5 @@
 //Retire Valid has to come from PC/fetch - infact i guess all of them
-//To implement the JAL JALR instructions
+//To implement the JAL - JALR instructions
 //To connect the RETIRE TRACE OUT
 //NEED EXTRA MUX to control the ZERO EXTEND AND SIGN EXTEND ON THE ALU OUT DATA FOR I' AND S Instruction type - lb , lh , lbu , lhu - On the data coming out of the DATA MEM. This SIGN EXT is controlled by the Main control signal (NEW)
 //o_sign_or_zero_ext_data_mux - Can i avoid this 3 bit mux sel signal by any chance - Can i use func3 instead?
@@ -20,7 +20,8 @@ module fetch (
     output reg  [31:0] PC
 );
     wire [31:0]pc_imm_mux_val;
-    assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? ({{i_imm_o_immediate[30:0],1'b0}}) : (PC + 4) ; 
+    //assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? (PC + {{i_imm_o_immediate[30:0],1'b0}}) : (PC + 4) ; 
+    assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? (PC + i_imm_o_immediate) : (PC + 4) ; 
     assign o_instr_mem_rd_addr = PC;
     always @(posedge clk) begin
         if(rst_n) begin
@@ -438,7 +439,7 @@ assign o_retire_rs1_raddr =   i_imem_rdata[19:15];
 assign o_retire_rs1_rdata =   o_rs1_rdata;         
 assign o_retire_rs2_raddr =   i_imem_rdata[24:20];         
 assign o_retire_rs2_rdata =   t_rs2_rdata;         
-assign o_retire_rd_waddr  =   i_imem_rdata[11:7];         
+assign o_retire_rd_waddr  =   t_rd_wen?i_imem_rdata[11:7]:5'b0;         
 assign o_retire_rd_wdata  =   i_dmem_alu_muxout_data;        
 assign o_retire_pc        =   PC_current_val;         
 assign o_retire_next_pc   =   PC_current_val + 4;   //Need to be modified based on Branch and Jump instructions   
@@ -456,7 +457,7 @@ assign i_imm_format =
 
 assign o_dmem_wdata = t_rs2_rdata;
 // Register File
-rf #(.BYPASS_EN(0)) reg_inst(
+rf #(.BYPASS_EN(0)) rf(
     .i_clk(i_clk),
     .i_rst(i_rst),
     .i_rs1_raddr(i_imem_rdata[19:15]),
