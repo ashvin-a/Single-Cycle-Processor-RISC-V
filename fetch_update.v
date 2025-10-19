@@ -43,7 +43,7 @@ module control_unit(
     output wire o_clu_ALUSrc,
     output wire o_clu_RegWrite,
     output wire [3:0]o_clu_dmem_mask,
-    output wire o_clu_lui_auipc_mux_sel, // The Mux in between reg and alu for lui and auipc instruction implementation
+    output wire [1:0]o_clu_lui_auipc_mux_sel, // The Mux in between reg and alu for lui and auipc instruction implementation
     output wire [1:0]o_clu_branch_instr_alu_sel, // Should be invalid by default
     output wire [2:0]o_sign_or_zero_ext_data_mux // This signal will go to 5:1 MUX which will choose between ZERO extend , SIGN EXTEND or NO EXTEND on the read data from the datamem - ONLY FOR LOAD
 );
@@ -416,7 +416,7 @@ wire [3:0] o_alu_control_sel;
 wire t_clu_ALUSrc, t_clu_MemtoReg, i_clu_branch;
 wire [31:0] PC_current_val;
 wire [31:0] t_lui_auipc_mux_data;
-wire t_clu_lui_auipc_mux_sel;
+wire [1:0]t_clu_lui_auipc_mux_sel;
 wire [2:0]t_sign_or_zero_ext_data_mux;
 wire [1:0] t_clu_branch_instr_alu_sel;
 wire [1:0]t_clu_alu_op;
@@ -444,8 +444,8 @@ assign i_imm_format =
     (i_imem_rdata[6:0] == 7'b0000011)? 6'b000010 : // I (Load)
     (i_imem_rdata[6:0] == 7'b0100011)? 6'b000100 : // S
     (i_imem_rdata[6:0] == 7'b1100011)? 6'b001000 : // B
-    (i_imem_rdata[6:0] == 7'b0110111)? 6'b010000 : // U
-    (i_imem_rdata[6:0] == 7'b1101111)? 6'b100000 : // J
+    ((i_imem_rdata[6:0] == 7'b0110111) || (i_imem_rdata[6:0] == 7'b0010111))? 6'b010000 : // U
+    ((i_imem_rdata[6:0] == 7'b1101111) || (i_imem_rdata[6:0] == 1100111))? 6'b100000 : // J
     6'bXXXXXX;
 
 assign o_dmem_wdata = t_rs2_rdata;
