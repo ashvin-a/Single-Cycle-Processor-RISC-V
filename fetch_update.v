@@ -457,7 +457,7 @@ assign i_imm_format =
 
 assign o_dmem_wdata = t_rs2_rdata;
 // Register File
-rf #(.BYPASS_EN(0)) reg_inst(
+rf #(.BYPASS_EN(0)) rf(
     .i_clk(i_clk),
     .i_rst(i_rst),
     .i_rs1_raddr(i_imem_rdata[19:15]),
