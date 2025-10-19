@@ -1,5 +1,5 @@
 //Retire Valid has to come from PC/fetch - infact i guess all of them
-//To implement the JAL JALR instructions
+//To implement the JAL - JALR instructions
 //To connect the RETIRE TRACE OUT
 //NEED EXTRA MUX to control the ZERO EXTEND AND SIGN EXTEND ON THE ALU OUT DATA FOR I' AND S Instruction type - lb , lh , lbu , lhu - On the data coming out of the DATA MEM. This SIGN EXT is controlled by the Main control signal (NEW)
 //o_sign_or_zero_ext_data_mux - Can i avoid this 3 bit mux sel signal by any chance - Can i use func3 instead?
@@ -20,7 +20,8 @@ module fetch (
     output reg  [31:0] PC
 );
     wire [31:0]pc_imm_mux_val;
-    assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? ({{i_imm_o_immediate[30:0],1'b0}}) : (PC + 4) ; 
+    //assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? (PC + {{i_imm_o_immediate[30:0],1'b0}}) : (PC + 4) ; 
+    assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? (PC + i_imm_o_immediate) : (PC + 4) ; 
     assign o_instr_mem_rd_addr = PC;
     always @(posedge clk) begin
         if(rst_n) begin
