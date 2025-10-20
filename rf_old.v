@@ -51,7 +51,7 @@ module rf #(
     // Fill in your implementation here.
 
     //Declaring 32 nos of 32 bit registers
-    reg [31:0] register[31:0];
+    reg [31:0] mem[31:0];
 
     //Declaring loop variable
     integer i;
@@ -61,11 +61,11 @@ module rf #(
         //Reset logic of register - Synchronous Active High i_rst
         if (i_rst)
             for (i=0; i<32; i = i + 1)
-                register[i] <= 32'd0;
+                mem[i] <= 32'd0;
         //Synchronous write when the write en is high
         else begin
             if (i_rd_wen && i_rd_waddr != 5'd0)
-                    register [i_rd_waddr] <= i_rd_wdata;
+                    mem [i_rd_waddr] <= i_rd_wdata;
         end
     end
 
@@ -73,8 +73,8 @@ module rf #(
 
    //Bypass logic
 
-        assign o_rs1_rdata = (BYPASS_EN) ? ((i_rd_wen && (i_rs1_raddr == i_rd_waddr) && (i_rd_waddr != 5'd0) )? i_rd_wdata : register[i_rs1_raddr]) : register[i_rs1_raddr];
-        assign o_rs2_rdata = (BYPASS_EN) ? ((i_rd_wen && (i_rs2_raddr == i_rd_waddr) && (i_rd_waddr != 5'd0) )? i_rd_wdata : register [i_rs2_raddr]) : register [i_rs2_raddr];  
+        assign o_rs1_rdata = (BYPASS_EN) ? ((i_rd_wen && (i_rs1_raddr == i_rd_waddr) && (i_rd_waddr != 5'd0) )? i_rd_wdata : mem[i_rs1_raddr]) : mem[i_rs1_raddr];
+        assign o_rs2_rdata = (BYPASS_EN) ? ((i_rd_wen && (i_rs2_raddr == i_rd_waddr) && (i_rd_waddr != 5'd0) )? i_rd_wdata : mem[i_rs2_raddr]) : mem[i_rs2_raddr];  
 
 
 endmodule
