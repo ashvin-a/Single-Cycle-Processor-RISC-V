@@ -1,27 +1,26 @@
-//Retire Valid has to come from PC/fetch - infact i guess all of them
-//To connect the RETIRE TRACE OUT
-//NEED EXTRA MUX to control the ZERO EXTEND AND SIGN EXTEND ON THE ALU OUT DATA FOR I' AND S Instruction type - lb , lh , lbu , lhu - On the data coming out of the DATA MEM. This SIGN EXT is controlled by the Main control signal (NEW)
-//o_sign_or_zero_ext_data_mux - Can i avoid this 3 bit mux sel signal by any chance - Can i use func3 instead?
-// BGE has greater than or equal to condition - Make sure it is covered??
-// check all the Dont care cases I have defined - is it ok to define Dont care
-// Module to Module connections - Ensure I have local temp wires to get the output and then connect to the next module (or else it will assume a single bit connection)
+// Retire Valid has to come from PC/fetch - infact i guess all of them
+// To connect the RETIRE TRACE OUT
+// Check all the Dont care cases I have defined - is it ok to define Dont care
 
-//Who will control the PC? - What is the signal input fromt he control Unit?
-//Shall we assume PC will have 0 as the address location value?
+
+`timescale 1ns/1ps
+
+/////////////////////////// FETCH MODULE ///////////////////////////
+
 module fetch (
     input  wire clk,
     input  wire rst_n,
-    input  wire i_clu_branch,
-    input  wire i_clu_halt,
-    input  wire i_alu_o_Zero,
-    input  wire [31:0] i_pc_o_rs1_data_mux_pcaddr,
+    input  wire i_clu_branch,                       // Updates the PC accordingly when there is a branch instruction
+    input  wire i_clu_halt,                         // When high the program has completed excecution and the PC stops updating
+    input  wire i_alu_o_Zero,                       // Needed for deciding between JALR+Branch and Other instructions
+    input  wire [31:0] i_pc_o_rs1_data_mux_pcaddr,  // Take o_rs1 for JALR instruction and PC for others
     input  wire [31:0]i_imm_o_immediate,
-    output wire [31:0]o_instr_mem_rd_addr, // read address is 32 bits and not 5 bits
+    output wire [31:0]o_instr_mem_rd_addr,          // Read address is 32 bits and not 5 bits
     output wire [31:0]o_pc_plus_4,
-    output reg  [31:0] PC
+    output reg  [31:0] PC                           // Program Counter register
 );
     wire [31:0]pc_imm_mux_val;
-    assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? (i_pc_o_rs1_data_mux_pcaddr + i_imm_o_immediate) : (PC + 4) ; 
+    assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? (i_pc_o_rs1_data_mux_pcaddr + i_imm_o_immediate) : (PC + 4) ; // Selecting the next value of PC to be updated after this fetch cycle according if breanch has to happen
     assign o_instr_mem_rd_addr = PC;
 
     assign o_pc_plus_4 = PC + 4;
@@ -37,6 +36,9 @@ module fetch (
     end
 endmodule
 
+
+/////////////////////////// MAIN CONTROL UNIT ///////////////////////////
+
 module control_unit(
     input  wire clk,
     input  wire rst_n,
@@ -49,24 +51,22 @@ module control_unit(
     output wire o_clu_MemWrite,
     output wire [1:0] o_clu_ALUSrc,
     output wire o_clu_RegWrite,
-    // output wire [3:0]o_clu_dmem_mask,
-    output wire [1:0]o_clu_lui_auipc_mux_sel, // The Mux in between reg and alu for lui and auipc instruction implementation
-    output wire [1:0]o_clu_branch_instr_alu_sel, // Should be invalid by default
+    output wire [1:0]o_clu_lui_auipc_mux_sel,       // The Mux in between reg and alu for lui and auipc instruction implementation
+    output wire [1:0]o_clu_branch_instr_alu_sel,    // Should be invalid by default
     output wire o_clu_pc_o_rs1_data_mux_sel,
     output wire [2:0]o_clu_ld_st_type_sel,
-    output wire [2:0]o_sign_or_zero_ext_data_mux // This signal will go to 5:1 MUX which will choose between ZERO extend , SIGN EXTEND or NO EXTEND on the read data from the datamem - ONLY FOR LOAD
+    output wire [2:0]o_sign_or_zero_ext_data_mux    // This signal will go to 5:1 MUX which will choose between ZERO extend , SIGN EXTEND or NO EXTEND on the read data from the datamem - ONLY FOR LOAD
 );
 
 assign o_clu_Branch =   ((i_clu_inst[6:0] == 7'b110_0011)|| (i_clu_inst[6:0] == 7'b110_1111) || (i_clu_inst[6:0] == 7'b110_0111)); // Branch enabled for BRANCH , JAL and JALR instruction types
 
-assign o_clu_halt = (i_clu_inst[6:0] == 7'b111_0011); // Halt
+assign o_clu_halt =     (i_clu_inst[6:0] == 7'b111_0011); // Halt
 
 assign o_clu_MemRead =  (i_clu_inst[6:0] == 7'b000_0011); // Load
 
 assign o_clu_MemtoReg = (i_clu_inst[6:0] == 7'b000_0011) ? 1'b1 : // Load
                         (i_clu_inst[6:0] == 7'b110_0011) ? 1'bx : // Branch
                         (i_clu_inst[6:0] == 7'b010_0011) ? 1'b0 : // Store
-                        //(i_clu_inst[6:0] == 7'b010_0011) ? 1'bx : // Store
                         (i_clu_inst[6:0] == 7'b110_1111) ? 1'b0 : // JAL
                         (i_clu_inst[6:0] == 7'b110_0111) ? 1'b0 : // JALR
                         1'b0;
@@ -89,25 +89,6 @@ assign o_clu_RegWrite = (i_clu_inst[6:0] == 7'b011_0011) || // R type
                         (i_clu_inst[6:0] == 7'b110_1111) || // Jal
                         (i_clu_inst[6:0] == 7'b110_0111);   // Jalr
 
-// assign o_clu_dmem_mask = ((i_clu_inst[6:0] == 7'b000_0011) || (i_clu_inst[6:0] == 7'b010_0011)) ? ( // Check for Load/Store instruction
-//                            (i_clu_inst[14:12] == 3'b000)? 4'b0001  : // Byte
-//                            (i_clu_inst[14:12] == 3'b001)? 4'b0011  : // Half
-//                            (i_clu_inst[14:12] == 3'b010)? 4'b1111  : // Word
-//                            (i_clu_inst[14:12] == 3'b100)? 4'b0001  : // Byte - unsigned - only for load
-//                            (i_clu_inst[14:12] == 3'b101)? 4'b0011  : // Half - unsigned - only for load
-//                            4'b1111) : 
-//                            4'b1111;
-
-//LOGIC 4
-// assign o_clu_dmem_mask =  ((i_clu_inst[6:0] == 7'b000_0011) || (i_clu_inst[6:0] == 7'b010_0011)) ? ( // Check for Load/Store instruction
-//                            (i_clu_inst[14:12] == 3'b000)? 4'b1000  : // Byte
-//                            (i_clu_inst[14:12] == 3'b001)? 4'b1100  : // Half
-//                            (i_clu_inst[14:12] == 3'b010)? 4'b1111  : // Word
-//                            (i_clu_inst[14:12] == 3'b100)? 4'b1000  : // Byte - unsigned - only for load
-//                            (i_clu_inst[14:12] == 3'b101)? 4'b1100  : // Half - unsigned - only for load
-//                            4'b1111) : 
-//                            4'b1111;
-
 assign o_clu_ALUOp =    ((i_clu_inst[6:0] == 7'b011_0011) || (i_clu_inst[6:0] == 7'b001_0011)) ?  2'b10 : // R and I type 
                         (i_clu_inst[6:0] == 7'b110_0011) ? 2'b01 : //Branch
                         2'b00;
@@ -122,14 +103,13 @@ assign o_clu_branch_instr_alu_sel  =    (i_clu_inst[6:0] == 7'b110_0011)? (     
                                         ((i_clu_inst[6:0] == 7'b110_1111) || (i_clu_inst[6:0] == 7'b110_0111)) ?  2'b01 : // JAl and JALR - forcing to ~o_eq check which is always true for PC+4 vs 32'b0
                                         2'bxx;
 
-assign o_clu_lui_auipc_mux_sel =    (i_clu_inst[6:0] == 7'b011_0111) ? 2'b01 : // LUI
-                                    (i_clu_inst[6:0] == 7'b001_0111) ? 2'b10 : // AUICP
-                                    ((i_clu_inst[6:0] == 7'b110_1111) || (i_clu_inst[6:0] == 7'b110_0111)) ? 2'b11 : // JAL, JALR
-                                    2'b00; // Register File
+assign o_clu_lui_auipc_mux_sel =        (i_clu_inst[6:0] == 7'b011_0111) ? 2'b01 : // LUI
+                                        (i_clu_inst[6:0] == 7'b001_0111) ? 2'b10 : // AUICP
+                                        ((i_clu_inst[6:0] == 7'b110_1111) || (i_clu_inst[6:0] == 7'b110_0111)) ? 2'b11 : // JAL, JALR
+                                        2'b00; // Register File
 
-assign o_clu_pc_o_rs1_data_mux_sel = (i_clu_inst[6:0] == 7'b110_0111); // JALR - Select o_rs1_data instead of PC
+assign o_clu_pc_o_rs1_data_mux_sel =    (i_clu_inst[6:0] == 7'b110_0111); // JALR - Select o_rs1_data instead of PC
 
-//LOGIC 5
 assign o_sign_or_zero_ext_data_mux =    (i_clu_inst[6:0] == 7'b000_0011) ? ( // Check for Load instruction
                                         (i_clu_inst[14:12] == 3'b000) ? 3'b001 : // lb
                                         (i_clu_inst[14:12] == 3'b001) ? 3'b011 : // lh
@@ -155,17 +135,15 @@ assign o_clu_ld_st_type_sel = (i_clu_inst[6:0] == 7'b000_0011) ? (              
 
 endmodule
 
+
+/////////////////////////// ALU MODULE ///////////////////////////
+
 // The arithmetic logic unit (ALU) is responsible for performing the core
 // calculations of the processor. It takes two 32-bit operands and outputs
 // a 32 bit result based on the selection operation - addition, comparison,
-// shift, or logical operation. This ALU is a purely combinational block, so
-// you should not attempt to add any registers or pipeline it in phase 3.
+// shift, or logical operation. 
+
 module alu (
-    // Major operation selection.
-    // NOTE: In order to simplify instruction decoding in phase 4, both 3'b010
-    // and 3'b011 are used for set less than (they are equivalent).
-    // Unsigned comparison is controlled through the `i_unsigned` signal.
-    //
     // 3'b000: addition/subtraction if `i_sub` asserted
     // 3'b001: shift left logical
     // 3'b010,
@@ -220,6 +198,9 @@ module alu (
     
 endmodule
 
+
+/////////////////////////// ALU WRAPPER ///////////////////////////
+
 module alu_wrapper (
     // 4 bit input from ALU Control block
     input  wire [ 3:0] i_alu_ctrl_opsel,
@@ -252,9 +233,8 @@ module alu_wrapper (
         .o_eq(o_eq),
         .o_slt(o_slt)
     );
-    ////////////////////////////////////////////
-    //////////INPUTS TO THE INSIDE ALU//////////
-    ////////////////////////////////////////////
+
+    // INPUTS TO THE INSIDE ALU
     assign i_unsigned = (i_alu_ctrl_opsel == 4'b1001)? 1'b1 : 1'b0; // Whenever it is SLTU , we will enable the unsigned signal high
     assign i_arith    = (i_alu_ctrl_opsel == 4'b0111)? 1'b1 : 1'b0;
     assign i_sub      = (i_alu_ctrl_opsel == 4'b0001)? 1'b1 : 1'b0;
@@ -271,15 +251,16 @@ module alu_wrapper (
                         (i_alu_ctrl_opsel == 4'b1010)? 3'b011 :    //PASS_B - LUI   - Can I use 011 for LUI?
                         3'bXXX; //Don't care               
     
-    ////////////////////////////////////////////
-    /////////////////OUTPUTS////////////////////
-    ////////////////////////////////////////////
+    // OUTPUTS
     assign o_alu_Zero = (i_clu_branch_instr_alu_sel == 2'b00) ?   o_eq :  //BEQ
                         (i_clu_branch_instr_alu_sel == 2'b01) ?  ~o_eq :  //BNE
                         (i_clu_branch_instr_alu_sel == 2'b10) ?  o_slt :  //BLT / BLTU 
                         ~o_slt;                                           //BGE / BGEU
                         
 endmodule
+
+
+/////////////////////////// ALU CONTROL ///////////////////////////
 
 module alu_control( input  wire [1:0]  i_clu_alu_op,
                     input  wire [31:0] i_instr_mem_inst,
@@ -319,6 +300,9 @@ assign o_alu_control_sel =
     (i_clu_alu_op == 2'b11) ? 4'bxxxx : 4'bxxxx;
 
 endmodule
+
+
+/////////////////////////// HART MODULE ///////////////////////////
 
 module hart #(
     // After reset, the program counter (PC) should be initialized to this
@@ -453,7 +437,7 @@ module hart #(
 `endif
 );
 
-// Immediate format decoding
+// Wire declarations
 wire [5:0] i_imm_format;
 wire [31:0] t_rs2_rdata;
 wire [31:0] i_dmem_alu_muxout_data;
@@ -476,15 +460,13 @@ wire [31:0] t_pc_o_rs1_data_mux_pcaddr;
 wire t_clu_pc_o_rs1_data_mux_sel;
 wire target;
 wire t_alu_o_Zero;
-
 wire [31:0]t_o_dmem_addr;
 wire t_dmem_wen;
 wire [3:0]t_dmem_mask;
 wire t_dmem_ren;
-
 wire [2:0]t_clu_ld_st_type_sel;
+wire [31:0] t_immediate_out_data;
 
-//temporary assignments
 assign o_retire_halt      = t_clu_halt;
 assign o_retire_valid     = 1;
 assign o_retire_inst      =   i_imem_rdata;         
@@ -498,7 +480,7 @@ assign o_retire_rd_wdata  =   i_dmem_alu_muxout_data;
 assign o_retire_pc        =   PC_current_val;         
 assign o_retire_next_pc   =   PC_current_val + 4;   //Need to be modified based on Branch and Jump instructions   
 
-
+// Immediate format decoding
 assign i_imm_format =   
     (i_imem_rdata[6:0] == 7'b0110011)? 6'b000001 : // R
     ((i_imem_rdata[6:0] == 7'b0010011)  || (i_imem_rdata[6:0] == 7'b1100111))? 6'b000010 : // I and Jalr
@@ -509,7 +491,8 @@ assign i_imm_format =
     (i_imem_rdata[6:0] == 7'b1101111)? 6'b100000 : // Jal
     6'bXXXXXX;
 
-//assign o_dmem_wdata = t_rs2_rdata;
+
+// DUT Instantiations
 
 // Register File
 rf #(.BYPASS_EN(0)) rf(
@@ -525,7 +508,7 @@ rf #(.BYPASS_EN(0)) rf(
 );
  
 // Immediate Generator
-wire [31:0] t_immediate_out_data;
+
 imm imm_decode_inst(
     .i_inst(i_imem_rdata),
     .i_format(i_imm_format),
@@ -553,65 +536,16 @@ alu_control alu_control_inst(
     .o_alu_control_sel(o_alu_control_sel)
 );
 
-//  Muxes
-///LOGIC 1
-// assign  i_dmem_rdata_sign_or_zero_ext_mux_data  =    (t_sign_or_zero_ext_data_mux == 3'b000)? {24'b0,i_dmem_rdata[7:0]} :                      //ZERO EXTEND - lbu
-//                                                      (t_sign_or_zero_ext_data_mux == 3'b001)? {{24{i_dmem_rdata[7]}},i_dmem_rdata[7:0]} :      //SIGN EXTEND - lb
-//                                                      (t_sign_or_zero_ext_data_mux == 3'b010)? {16'b0,i_dmem_rdata[15:0]} :                     //ZERO EXTEND - lhu
-//                                                      (t_sign_or_zero_ext_data_mux == 3'b011)? {{16{i_dmem_rdata[15]}},i_dmem_rdata[15:0]} :    //SIGN EXTEND - lh
-//                                                      (t_sign_or_zero_ext_data_mux == 3'b100)? i_dmem_rdata :                                   //NO EXTEND
-//                                                      i_dmem_rdata;
-
-// SHOULD WE CHECK THIS BASED ON MASK ITSELF? - THIS IS ONLY FOR LOAD
-// assign  i_dmem_rdata_sign_or_zero_ext_mux_data  =    ((t_dmem_mask == 4'b0001) && (t_sign_or_zero_ext_data_mux == 3'b000))? {24'b0,i_dmem_rdata[31:24]} :                      //ZERO EXTEND - lbu
-//                                                      ((t_dmem_mask == 4'b0001) && (t_sign_or_zero_ext_data_mux == 3'b001))? {{24{i_dmem_rdata[31]}},i_dmem_rdata[31:24]} :      //SIGN EXTEND - lb
-//                                                      ((t_dmem_mask == 4'b0011) && (t_sign_or_zero_ext_data_mux == 3'b010))? {16'b0,i_dmem_rdata[31:16]} :                     //ZERO EXTEND - lhu
-//                                                      ((t_dmem_mask == 4'b0011) && (t_sign_or_zero_ext_data_mux == 3'b011))? {{16{i_dmem_rdata[31]}},i_dmem_rdata[31:16]} :    //SIGN EXTEND - lh
-//                                                      ((t_dmem_mask == 4'b1111) && (t_sign_or_zero_ext_data_mux == 3'b100))? i_dmem_rdata :                                   //NO EXTEND
-//                                                      i_dmem_rdata;// Other than LOAD what should be this data?
-assign o_dmem_wen = t_dmem_wen;
-assign o_dmem_ren = t_dmem_ren;
-//LOGIC 2
-// //Make this only for STORE
-// assign o_dmem_wdata = (t_dmem_mask == 4'b1000) ? t_rs2_rdata: //Applicable for lb / sb / lbu / sbu
-//                       (t_dmem_mask == 4'b1100)? {t_rs2_rdata[15:0],16'b0 }: // Applicable for lh / sh / lhu / shu 
-//                       (t_dmem_mask == 4'b1111)? t_rs2_rdata :   
-//                        t_rs2_rdata ; //DO I NEED TO GIVE ANY VALUE TO THIS BUS FOR INSTRUCTIONS OTHER THAN LOAD?
-// assign o_dmem_wdata = (t_dmem_mask == 4'b0001) ? {t_rs2_rdata[7:0], 24'b0} : // Applicable for sb
-//                       (t_dmem_mask == 4'b0011) ? {t_rs2_rdata[15:0], 16'b0} : // Applicable for sh
-//                       (t_dmem_mask == 4'b1111) ? t_rs2_rdata :   
-                    //   32'bxxxx; // Default case ; //DO I NEED TO GIVE ANY VALUE TO THIS BUS FOR INSTRUCTIONS OTHER THAN LOAD?
-//assign o_dmem_wdata = t_rs2_rdata ; // DATA Going to the DMEM from RF ONLY DURING STORE - MASKING WILL BE TAKEN CARE AT THE MEMORY BY MEMORY?
-
-///LOGIC 3
-assign o_dmem_addr = (t_dmem_wen || t_dmem_ren) ? {t_o_dmem_addr[31:2],2'b0} : t_o_dmem_addr; //Only when w_en or ren is set we are to align the addresses
-
-assign i_dmem_alu_muxout_data                   =   t_clu_MemtoReg ? i_dmem_rdata_sign_or_zero_ext_mux_data : o_dmem_addr;
-
-
-assign rs2_rdata_imm_mux_data                   =   (t_clu_ALUSrc == 2'b00) ? 32'b0 : 
-                                                    (t_clu_ALUSrc == 2'b01) ? t_immediate_out_data :
-                                                    (t_clu_ALUSrc == 2'b10) ? t_rs2_rdata :
-                                                    t_rs2_rdata;
-assign t_lui_auipc_mux_data                     =   (t_clu_lui_auipc_mux_sel == 2'b00)? o_rs1_rdata :    //Default
-                                                    (t_clu_lui_auipc_mux_sel == 2'b01)? 32'b0 :          //LUI
-                                                    (t_clu_lui_auipc_mux_sel == 2'b10)? PC_current_val : //AUIPC
-                                                    (t_clu_lui_auipc_mux_sel == 2'b11)? t_pc_plus_4 :    //Jal, Jalr
-                                                    o_rs1_rdata;
-assign t_pc_o_rs1_data_mux_pcaddr                 = (t_clu_pc_o_rs1_data_mux_sel) ? (o_rs1_rdata) :  PC_current_val; // Select o_rs1_data for jalr instruction else retain pc        
-
 // ALU
 alu_wrapper alu_wrapper_inst(
     .i_alu_ctrl_opsel(o_alu_control_sel),
     .i_rf_op1(t_lui_auipc_mux_data), //replaced it with Muxed out data from the 4:1 mux
     .i_rf_op2(rs2_rdata_imm_mux_data),
     .i_clu_branch_instr_alu_sel(t_clu_branch_instr_alu_sel),
-    //.o_alu_result(o_dmem_addr),
     .o_alu_result(t_o_dmem_addr),
     .o_alu_Zero(t_alu_o_Zero)
 );
 
-assign o_dmem_mask = t_dmem_mask;
 // Control Unit
 control_unit control_unit_inst(
     .clk(i_clk),
@@ -625,7 +559,6 @@ control_unit control_unit_inst(
     .o_clu_MemWrite(t_dmem_wen),
     .o_clu_ALUSrc(t_clu_ALUSrc),
     .o_clu_RegWrite(t_rd_wen),
-    // .o_clu_dmem_mask(t_dmem_mask),
     .o_clu_lui_auipc_mux_sel(t_clu_lui_auipc_mux_sel),
     .o_clu_branch_instr_alu_sel(t_clu_branch_instr_alu_sel),
     .o_clu_pc_o_rs1_data_mux_sel(t_clu_pc_o_rs1_data_mux_sel),
@@ -633,7 +566,25 @@ control_unit control_unit_inst(
     .o_sign_or_zero_ext_data_mux(t_sign_or_zero_ext_data_mux)
 );
 
+//  Muxes
+assign o_dmem_wen = t_dmem_wen;
+assign o_dmem_ren = t_dmem_ren;
+assign o_dmem_addr = (t_dmem_wen || t_dmem_ren) ? {t_o_dmem_addr[31:2],2'b0} : t_o_dmem_addr; //Only when w_en or ren is set we are to align the addresses
+assign i_dmem_alu_muxout_data                   =   t_clu_MemtoReg ? i_dmem_rdata_sign_or_zero_ext_mux_data : o_dmem_addr;
+assign rs2_rdata_imm_mux_data                   =   (t_clu_ALUSrc == 2'b00) ? 32'b0 : 
+                                                    (t_clu_ALUSrc == 2'b01) ? t_immediate_out_data :
+                                                    (t_clu_ALUSrc == 2'b10) ? t_rs2_rdata :
+                                                    t_rs2_rdata;
+assign t_lui_auipc_mux_data                     =   (t_clu_lui_auipc_mux_sel == 2'b00)? o_rs1_rdata :    //Default
+                                                    (t_clu_lui_auipc_mux_sel == 2'b01)? 32'b0 :          //LUI
+                                                    (t_clu_lui_auipc_mux_sel == 2'b10)? PC_current_val : //AUIPC
+                                                    (t_clu_lui_auipc_mux_sel == 2'b11)? t_pc_plus_4 :    //Jal, Jalr
+                                                    o_rs1_rdata;
+assign t_pc_o_rs1_data_mux_pcaddr                 = (t_clu_pc_o_rs1_data_mux_sel) ? (o_rs1_rdata) :  PC_current_val; // Select o_rs1_data for jalr instruction else retain pc        
+
 //MASK Implementation
+assign o_dmem_mask = t_dmem_mask;
+
 assign t_dmem_mask =    ((t_clu_ld_st_type_sel == 3'b000) || (t_clu_ld_st_type_sel == 3'b011) || (t_clu_ld_st_type_sel == 3'b101)) ? ( // For lb, lbu, sb - BYTE
                             (t_o_dmem_addr[1:0] == 2'b00) ? 4'b0001 : // Eg. 2000
                             (t_o_dmem_addr[1:0] == 2'b01) ? 4'b0010 : // Eg. 2001
@@ -668,13 +619,21 @@ assign  i_dmem_rdata_sign_or_zero_ext_mux_data  =   (t_dmem_mask == 4'b0001) && 
  
 // For store instructions only 
 // Do we need any sign extension or zero extension for this data to be written? - NEED TO DO
-assign o_dmem_wdata =   (t_dmem_mask == 4'b0001) ? {24'b0,t_rs2_rdata[7:0]} :           // Applicable for sb
-                        (t_dmem_mask == 4'b0010) ? {16'b0,t_rs2_rdata[15:8],8'b0} :     // Applicable for sb
-                        (t_dmem_mask == 4'b0100) ? {8'b0,t_rs2_rdata[23:16],16'b0} :    // Applicable for sb
-                        (t_dmem_mask == 4'b1000) ? {t_rs2_rdata[7:0],24'b0} :         // Applicable for sb
-                        (t_dmem_mask == 4'b0011) ? {{16{t_rs2_rdata[15]}},t_rs2_rdata[15:0]} :          // Applicable for sh - SIGN EXTENSION by default
-                        (t_dmem_mask == 4'b1100) ? {t_rs2_rdata[15:0],16'b0} :         // Applicable for sh
+// Dont we have to maintain the value of the other bytes than the byte that we are writting to in the memory
+assign o_dmem_wdata =   (t_dmem_mask == 4'b0001) ? {{24{t_rs2_rdata[7]}},t_rs2_rdata[7:0]} :                   // Applicable for sb
+                        (t_dmem_mask == 4'b0010) ? {{16{t_rs2_rdata[15]}},t_rs2_rdata[15:8],8'b0} :             // Applicable for sb
+                        (t_dmem_mask == 4'b0100) ? {{8{t_rs2_rdata[23]}},t_rs2_rdata[23:16],16'b0} :            // Applicable for sb
+                        (t_dmem_mask == 4'b1000) ? {t_rs2_rdata[7:0],24'b0} :                   // Applicable for sb
+                        (t_dmem_mask == 4'b0011) ? {{16{t_rs2_rdata[15]}},t_rs2_rdata[15:0]} :  // Applicable for sh - SIGN EXTENSION by default
+                        (t_dmem_mask == 4'b1100) ? {t_rs2_rdata[15:0],16'b0} :                  // Applicable for sh
                         (t_dmem_mask == 4'b1111) ? t_rs2_rdata :  
-                        32'bxxxx; // Default case ;
+                        32'bxxxx;                                                               // Default case
 
 endmodule
+
+
+// To - do's
+// Trap signal implementation
+// Valid signal implementation
+// Review architecture with George
+// Review verilog with Eric
