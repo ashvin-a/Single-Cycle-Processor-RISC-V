@@ -4,3 +4,7 @@ imm_tb.sv
 rf_tb.sv
 transcript
 .history/
+db/
+incremental_db/
+simulation/
+output_files/
