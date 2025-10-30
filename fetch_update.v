@@ -267,14 +267,12 @@ module alu_control( input  wire [1:0]  i_clu_alu_op,
                     output wire [3:0]  o_alu_control_sel
                     );
 
-wire [5:0] op_code;
 wire [2:0] funct3;
 wire [6:0] funct7;
 wire opcode_5thbit_add_sub;
 
 assign funct3  = i_instr_mem_inst[14:12];
 assign funct7  = i_instr_mem_inst[31:25];
-assign op_code = i_instr_mem_inst[6:0];
 assign opcode_5thbit_add_sub = i_instr_mem_inst[5];
 
 assign o_alu_control_sel = 
@@ -494,27 +492,6 @@ assign i_imm_format =
 
 // DUT Instantiations
 
-// Register File
-rf #(.BYPASS_EN(0)) rf(
-    .i_clk(i_clk),
-    .i_rst(i_rst),
-    .i_rs1_raddr(i_imem_rdata[19:15]),
-    .i_rs2_raddr(i_imem_rdata[24:20]),
-    .i_rd_waddr(i_imem_rdata[11:7]),
-    .i_rd_wen(t_rd_wen),
-    .i_rd_wdata(i_dmem_alu_muxout_data),
-    .o_rs1_rdata(o_rs1_rdata),
-    .o_rs2_rdata(t_rs2_rdata)
-);
- 
-// Immediate Generator
-
-imm imm_decode_inst(
-    .i_inst(i_imem_rdata),
-    .i_format(i_imm_format),
-    .o_immediate(t_immediate_out_data)
-);
-
 // Fetch Section
 fetch fetch_inst(
     .clk(i_clk),
@@ -529,21 +506,34 @@ fetch fetch_inst(
     .o_instr_mem_rd_addr(o_imem_raddr)
 );
 
-// ALU Control
-alu_control alu_control_inst( 
-    .i_clu_alu_op(t_clu_alu_op),
-    .i_instr_mem_inst(i_imem_rdata),
-    .o_alu_control_sel(o_alu_control_sel)
-);
+//////////*IF_ID Pipeline Register Implementation*////////
+//TODO : Enable Clear and ready
+reg [95:0]IF_ID;
+wire [95:0]IF_ID_temp;
+assign IF_ID_temp = {t_pc_plus_4,PC_current_val,i_imem_rdata};
+//Implementing the synchronous logics
+always @ (posedge i_clk) begin
+    //Reset logic of register - Synchronous Active High i_rst
+    if (i_rst)
+            mem[i] <= 95'b0;
+    //Synchronous write when the write en is high
+    else begin
+            IF_ID <= IF_ID_temp;
+    end
+end
 
-// ALU
-alu_wrapper alu_wrapper_inst(
-    .i_alu_ctrl_opsel(o_alu_control_sel),
-    .i_rf_op1(t_lui_auipc_mux_data), //replaced it with Muxed out data from the 4:1 mux
-    .i_rf_op2(rs2_rdata_imm_mux_data),
-    .i_clu_branch_instr_alu_sel(t_clu_branch_instr_alu_sel),
-    .o_alu_result(t_o_dmem_addr),
-    .o_alu_Zero(t_alu_o_Zero)
+// Register File
+rf #(.BYPASS_EN(0)) rf(
+    .i_clk(i_clk),
+    .i_rst(i_rst),
+    .i_rs1_raddr(i_imem_rdata[19:15]),
+    .i_rs2_raddr(i_imem_rdata[24:20]),
+    //.i_rd_waddr(i_imem_rdata[11:7]), //TODO:NEEDS UPDATE
+    .i_rd_waddr(pp3_i_imem_rd_waddr), //TODO:NEEDS UPDATE
+    .i_rd_wen(t_rd_wen),
+    .i_rd_wdata(i_dmem_alu_muxout_data),
+    .o_rs1_rdata(o_rs1_rdata),
+    .o_rs2_rdata(t_rs2_rdata)
 );
 
 // Control Unit
@@ -565,6 +555,49 @@ control_unit control_unit_inst(
     .o_clu_ld_st_type_sel(t_clu_ld_st_type_sel),
     .o_sign_or_zero_ext_data_mux(t_sign_or_zero_ext_data_mux)
 );
+
+// Immediate Generator
+imm imm_decode_inst(
+    .i_inst(i_imem_rdata),
+    .i_format(i_imm_format),
+    .o_immediate(t_immediate_out_data)
+);
+
+wire [4:0] pp3_i_imem_rd_waddr; //TODO : To connect other pipeline outputs
+
+//////////*ID_EX Pipeline Register Implementation////////
+reg [95:0]ID_MEM;
+wire [95:0]ID_MEM_temp;
+assign IF_ID_temp = {i_imem};
+//Implementing the synchronous logics
+always @ (posedge i_clk) begin
+    //Reset logic of register - Synchronous Active High i_rst
+    if (i_rst)
+            mem[i] <= 95'b0;
+    //Synchronous write when the write en is high
+    else begin
+            IF_ID <= IF_ID_temp;
+    end
+end
+
+// ALU Control
+alu_control alu_control_inst( 
+    .i_clu_alu_op(t_clu_alu_op),
+    .i_instr_mem_inst(i_imem_rdata),
+    .o_alu_control_sel(o_alu_control_sel)
+);
+
+// ALU
+alu_wrapper alu_wrapper_inst(
+    .i_alu_ctrl_opsel(o_alu_control_sel),
+    .i_rf_op1(t_lui_auipc_mux_data), //replaced it with Muxed out data from the 4:1 mux
+    .i_rf_op2(rs2_rdata_imm_mux_data),
+    .i_clu_branch_instr_alu_sel(t_clu_branch_instr_alu_sel),
+    .o_alu_result(t_o_dmem_addr),
+    .o_alu_Zero(t_alu_o_Zero)
+);
+
+
 
 //  Muxes
 assign o_dmem_wen = t_dmem_wen;
@@ -618,8 +651,6 @@ assign  i_dmem_rdata_sign_or_zero_ext_mux_data  =   (t_dmem_mask == 4'b0001) && 
                                                                                 i_dmem_rdata ;
  
 // For store instructions only 
-// Do we need any sign extension or zero extension for this data to be written? - NEED TO DO
-// Dont we have to maintain the value of the other bytes than the byte that we are writting to in the memory
 assign o_dmem_wdata =   (t_dmem_mask == 4'b0001) ? {{24{t_rs2_rdata[7]}},t_rs2_rdata[7:0]} :                   // Applicable for sb
                         (t_dmem_mask == 4'b0010) ? {{16{t_rs2_rdata[15]}},t_rs2_rdata[15:8],8'b0} :             // Applicable for sb
                         (t_dmem_mask == 4'b0100) ? {{8{t_rs2_rdata[23]}},t_rs2_rdata[23:16],16'b0} :            // Applicable for sb
@@ -630,10 +661,3 @@ assign o_dmem_wdata =   (t_dmem_mask == 4'b0001) ? {{24{t_rs2_rdata[7]}},t_rs2_r
                         32'bxxxx;                                                               // Default case
 
 endmodule
-
-
-// To - do's
-// Trap signal implementation
-// Valid signal implementation
-// Review architecture with George
-// Review verilog with Eric
