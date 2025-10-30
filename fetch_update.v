@@ -529,22 +529,6 @@ fetch_flopped fetch_inst(
     .o_instr_mem_rd_addr_ff(o_imem_raddr)
 );
 
-// ALU Control
-alu_control alu_control_inst( 
-    .i_clu_alu_op(t_clu_alu_op),
-    .i_instr_mem_inst(i_imem_rdata),
-    .o_alu_control_sel(o_alu_control_sel)
-);
-
-// ALU
-alu_wrapper alu_wrapper_inst(
-    .i_alu_ctrl_opsel(o_alu_control_sel),
-    .i_rf_op1(t_lui_auipc_mux_data), //replaced it with Muxed out data from the 4:1 mux
-    .i_rf_op2(rs2_rdata_imm_mux_data),
-    .i_clu_branch_instr_alu_sel(t_clu_branch_instr_alu_sel),
-    .o_alu_result(t_o_dmem_addr),
-    .o_alu_Zero(t_alu_o_Zero)
-);
 
 // Control Unit
 control_unit control_unit_inst(
@@ -565,6 +549,42 @@ control_unit control_unit_inst(
     .o_clu_ld_st_type_sel(t_clu_ld_st_type_sel),
     .o_sign_or_zero_ext_data_mux(t_sign_or_zero_ext_data_mux)
 );
+
+//////////*ID_EX Pipeline Register Implementation////////
+//! Im not considering the signals that are'nt passed onto the ID_EX pipeline.
+//? 5 + (32 + 32 + 32) + (32 + 32) + (32 + 32 + 32) + (32 + 32) + ctrl_signal_bit{2 + 2 + 2 + 1 + 1 + 1 + 1 + 1}
+reg [335:0]ID_EX;
+wire [335:0]ID_EX_temp;
+assign ID_EX_temp = {i_imem};
+//Implementing the synchronous logics
+always @ (posedge i_clk) begin
+    //Reset logic of register - Synchronous Active High i_rst
+    if (i_rst)
+            mem[i] <= 336'b0;
+    //Synchronous write when the write en is high
+    else begin
+            ID_EX <= ID_EX_temp;
+    end
+end
+
+// ALU Control
+alu_control alu_control_inst( 
+    .i_clu_alu_op(t_clu_alu_op),
+    .i_instr_mem_inst(i_imem_rdata),
+    .o_alu_control_sel(o_alu_control_sel)
+);
+
+// ALU
+alu_wrapper alu_wrapper_inst(
+    .i_alu_ctrl_opsel(o_alu_control_sel),
+    .i_rf_op1(t_lui_auipc_mux_data), //replaced it with Muxed out data from the 4:1 mux
+    .i_rf_op2(rs2_rdata_imm_mux_data),
+    .i_clu_branch_instr_alu_sel(t_clu_branch_instr_alu_sel),
+    .o_alu_result(t_o_dmem_addr),
+    .o_alu_Zero(t_alu_o_Zero)
+);
+
+
 
 //  Muxes
 assign o_dmem_wen = t_dmem_wen;
