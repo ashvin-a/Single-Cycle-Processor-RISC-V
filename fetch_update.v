@@ -516,7 +516,7 @@ imm imm_decode_inst(
 );
 
 // Fetch Section
-fetch_flopped fetch_inst(
+fetch fetch_inst(
     .clk(i_clk),
     .rst_n(i_rst),
     .i_clu_branch(i_clu_branch),
@@ -524,9 +524,9 @@ fetch_flopped fetch_inst(
     .i_alu_o_Zero(t_alu_o_Zero),
     .i_imm_o_immediate(t_immediate_out_data),
     .i_pc_o_rs1_data_mux_pcaddr(t_pc_o_rs1_data_mux_pcaddr),
-    .PC_ff(PC_current_val),
-    .o_pc_plus_4_ff(t_pc_plus_4),
-    .o_instr_mem_rd_addr_ff(o_imem_raddr)
+    .PC(PC_current_val),
+    .o_pc_plus_4(t_pc_plus_4),
+    .o_instr_mem_rd_addr(o_imem_raddr)
 );
 
 
