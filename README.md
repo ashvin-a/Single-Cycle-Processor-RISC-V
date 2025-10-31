@@ -1,7 +1,8 @@
 # Single-Cycle-Processor-RISC-V
 A project that was done as part of ECE 552
 
-
+# Current Architecture
+![MPJ-Mark-2](https://github.com/ashvin-a/Single-Cycle-Processor-RISC-V/blob/main/project_files/image.png)
 # Guys Please Read this to know how to use Git!!! 🛐
 I'll just go through the basic idea on what Git does so that you'll get a grasp on 
 what it does and how to use it.
@@ -36,5 +37,6 @@ And before pushing, I'd suggest you to run this command
 And btw, DO NOT PUSH TO MAIN! (Coding Standards).
 
 If you have ANY DOUBTS, pleeeease call meeee!!!! 🫡
+
 
 A helpful resource that I personally found useful : [Link](https://www.youtube.com/playlist?list=PL4cUxeGkcC9goXbgTDQ0n_4TBzOO0ocPR)
