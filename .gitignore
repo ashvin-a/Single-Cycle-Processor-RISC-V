@@ -8,3 +8,6 @@ db/
 incremental_db/
 simulation/
 output_files/
+*.mti
+*.mpf
+vsim.wlf
