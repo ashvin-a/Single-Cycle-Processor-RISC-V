@@ -10,17 +10,20 @@
 module fetch (
     input  wire clk,
     input  wire rst_n,
-    input  wire i_clu_branch,                       // Updates the PC accordingly when there is a branch instruction
+    //input  wire i_clu_branch,                       // Updates the PC accordingly when there is a branch instruction // Not required anymore as we are ANDING it within the MEM stage itself
     input  wire i_clu_halt,                         // When high the program has completed excecution and the PC stops updating
-    input  wire i_alu_o_Zero,                       // Needed for deciding between JALR+Branch and Other instructions
-    input  wire [31:0] i_pc_o_rs1_data_mux_pcaddr,  // Take o_rs1 for JALR instruction and PC for others
-    input  wire [31:0]i_imm_o_immediate,
+    //input  wire i_alu_o_Zero,                       // Needed for deciding between JALR+Branch and Other instructions  // Not required anymore as we are ANDING it within the MEM stage itself
+    input  wire i_alu_o_Zero_clu_Branch_and,            // NEW ANDed SIGNAL from MEM Stage of the pipeline
+    //input  wire [31:0] i_pc_o_rs1_data_mux_pcaddr,  // Take o_rs1 for JALR instruction and PC for others
+    input  wire [31:0] i_pc_o_rs1_data_mux_imm_add_data,  // Take o_rs1 for JALR instruction and PC for others
+    //input  wire [31:0]i_imm_o_immediate,
     output wire [31:0]o_instr_mem_rd_addr,          // Read address is 32 bits and not 5 bits
     output wire [31:0]o_pc_plus_4,
     output reg  [31:0] PC                           // Program Counter register
 );
     wire [31:0]pc_imm_mux_val;
-    assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? (i_pc_o_rs1_data_mux_pcaddr + i_imm_o_immediate) : (PC + 4) ; // Selecting the next value of PC to be updated after this fetch cycle according if breanch has to happen
+    //assign pc_imm_mux_val = (i_clu_branch & i_alu_o_Zero)? (i_pc_o_rs1_data_mux_pcaddr + i_imm_o_immediate) : (PC + 4) ; // Selecting the next value of PC to be updated after this fetch cycle according if breanch has to happen
+    assign pc_imm_mux_val = (i_alu_o_Zero_clu_Branch_and)? (i_pc_o_rs1_data_mux_imm_add_data) : (PC + 4) ; // Selecting the next value of PC to be updated after this fetch cycle according if breanch has to happen
     assign o_instr_mem_rd_addr = PC;
 
     assign o_pc_plus_4 = PC + 4;
@@ -36,15 +39,13 @@ module fetch (
     end
 endmodule
 
-
 /////////////////////////// MAIN CONTROL UNIT ///////////////////////////
-
 module control_unit(
     input  wire clk,
     input  wire rst_n,
     input  wire [31:0] i_clu_inst,
     output wire o_clu_Branch,
-    output wire o_clu_halt,
+    output wire o_clu_halt, // TODO - To check whether we have to connect it at which stage of the pipeline
     output wire o_clu_MemRead,
     output wire o_clu_MemtoReg,
     output wire [1:0]o_clu_ALUOp,
@@ -135,7 +136,6 @@ assign o_clu_ld_st_type_sel = (i_clu_inst[6:0] == 7'b000_0011) ? (              
 
 endmodule
 
-
 /////////////////////////// ALU MODULE ///////////////////////////
 
 // The arithmetic logic unit (ALU) is responsible for performing the core
@@ -198,7 +198,6 @@ module alu (
     
 endmodule
 
-
 /////////////////////////// ALU WRAPPER ///////////////////////////
 
 module alu_wrapper (
@@ -258,24 +257,15 @@ module alu_wrapper (
                         ~o_slt;                                           //BGE / BGEU
                         
 endmodule
-
-
 /////////////////////////// ALU CONTROL ///////////////////////////
 
 module alu_control( input  wire [1:0]  i_clu_alu_op,
-                    input  wire [31:0] i_instr_mem_inst,
+                    // input  wire [31:0] i_instr_mem_inst,
+                    input  wire [2:0] funct3,
+                    input  wire [6:0] funct7,
+                    input  wire opcode_5thbit_add_sub, // TODO - Change the name from add_sub to R_I as this for that purpose
                     output wire [3:0]  o_alu_control_sel
                     );
-
-wire [5:0] op_code;
-wire [2:0] funct3;
-wire [6:0] funct7;
-wire opcode_5thbit_add_sub;
-
-assign funct3  = i_instr_mem_inst[14:12];
-assign funct7  = i_instr_mem_inst[31:25];
-assign op_code = i_instr_mem_inst[6:0];
-assign opcode_5thbit_add_sub = i_instr_mem_inst[5];
 
 assign o_alu_control_sel = 
     (i_clu_alu_op == 2'b00) ? 4'b0000 : // Forced Addition (S, U, J) - Here we can have I' and S as well
@@ -301,9 +291,7 @@ assign o_alu_control_sel =
 
 endmodule
 
-
 /////////////////////////// HART MODULE ///////////////////////////
-
 module hart #(
     // After reset, the program counter (PC) should be initialized to this
     // address and start executing instructions from there.
@@ -445,7 +433,7 @@ wire [31:0] o_rs1_rdata;
 wire [31:0] rs2_rdata_imm_mux_data;
 wire [3:0] o_alu_control_sel;
 wire [1:0] t_clu_ALUSrc;
-wire t_clu_MemtoReg, i_clu_branch;
+wire t_clu_MemtoReg, t_clu_branch;
 wire t_clu_halt;
 wire [31:0] PC_current_val;
 wire [31:0] t_lui_auipc_mux_data;
@@ -467,91 +455,88 @@ wire t_dmem_ren;
 wire [2:0]t_clu_ld_st_type_sel;
 wire [31:0] t_immediate_out_data;
 
+//////////Phase 5 Wires//////////
+wire [4:0] t_i_rd_waddr;
+wire t_i_rd_wen;
+wire [31:0] t_pc_o_rs1_data_mux_imm_add_data; // New wire added for the imm and PC added value which is passed through EX/MEM Pipieline register
+wire t_alu_o_Zero_clu_Branch_and; // NEW INPUT ADDED FOR THE ANDing in MEM stage
+wire [31:0] t_pc_o_rs1_data_mux_imm_add_EX_stage_data; //TODO - Should go to EX/MEM Pipeline Register
+wire [31:0] f_rs2_rdata;
+wire [31:0] t_o_alu_result; // Getting the Alu result before pipelining
+
+///TODO - To change all the reture signals to the latest values pipelined
 assign o_retire_halt      = t_clu_halt;
 assign o_retire_valid     = 1;
 assign o_retire_inst      =   i_imem_rdata;         
 assign o_retire_trap      =   0; //Temporary assignment - Need to be modified         
-assign o_retire_rs1_raddr =   i_imem_rdata[19:15];         
-assign o_retire_rs1_rdata =   o_rs1_rdata;         
-assign o_retire_rs2_raddr =   i_imem_rdata[24:20];         
-assign o_retire_rs2_rdata =   t_rs2_rdata;         
+assign o_retire_rs1_raddr =   i_imem_rdata[19:15];   // TODO - When to retire - Do we need to get it from the pipeline      
+assign o_retire_rs1_rdata =   o_rs1_rdata;           // TODO - When to retire - Do we need to get it from the pipeline 
+assign o_retire_rs2_raddr =   i_imem_rdata[24:20];   // TODO - When to retire - Do we need to get it from the pipeline 
+assign o_retire_rs2_rdata =   t_rs2_rdata;           // TODO - When to retire - Do we need to get it from the pipeline 
 assign o_retire_rd_waddr  =   t_rd_wen?i_imem_rdata[11:7]:5'b0;         
 assign o_retire_rd_wdata  =   i_dmem_alu_muxout_data;        
 assign o_retire_pc        =   PC_current_val;         
 assign o_retire_next_pc   =   PC_current_val + 4;   //Need to be modified based on Branch and Jump instructions   
 
-// Immediate format decoding
-assign i_imm_format =   
-    (i_imem_rdata[6:0] == 7'b0110011)? 6'b000001 : // R
-    ((i_imem_rdata[6:0] == 7'b0010011)  || (i_imem_rdata[6:0] == 7'b1100111))? 6'b000010 : // I and Jalr
-    (i_imem_rdata[6:0] == 7'b0000011)? 6'b000010 : // I (Load)
-    (i_imem_rdata[6:0] == 7'b0100011)? 6'b000100 : // S
-    (i_imem_rdata[6:0] == 7'b1100011)? 6'b001000 : // B
-    ((i_imem_rdata[6:0] == 7'b0110111) || (i_imem_rdata[6:0] == 7'b0010111))? 6'b010000 : // U
-    (i_imem_rdata[6:0] == 7'b1101111)? 6'b100000 : // Jal
-    6'bXXXXXX;
-
-
 // DUT Instantiations
-
-// Register File
-rf #(.BYPASS_EN(0)) rf(
-    .i_clk(i_clk),
-    .i_rst(i_rst),
-    .i_rs1_raddr(i_imem_rdata[19:15]),
-    .i_rs2_raddr(i_imem_rdata[24:20]),
-    .i_rd_waddr(i_imem_rdata[11:7]),
-    .i_rd_wen(t_rd_wen),
-    .i_rd_wdata(i_dmem_alu_muxout_data),
-    .o_rs1_rdata(o_rs1_rdata),
-    .o_rs2_rdata(t_rs2_rdata)
-);
- 
-// Immediate Generator
-
-imm imm_decode_inst(
-    .i_inst(i_imem_rdata),
-    .i_format(i_imm_format),
-    .o_immediate(t_immediate_out_data)
-);
-
 // Fetch Section
 fetch fetch_inst(
     .clk(i_clk),
     .rst_n(i_rst),
-    .i_clu_branch(i_clu_branch),
+    //.i_clu_branch(t_clu_branch), //TODO - Needs to update with the 3rd pipeline input of the Branch control signal - NOT NEEDED ANY MORE AS WE ARE SENDING OUT AN ANDED SIGNAL
     .i_clu_halt(t_clu_halt),
-    .i_alu_o_Zero(t_alu_o_Zero),
-    .i_imm_o_immediate(t_immediate_out_data),
-    .i_pc_o_rs1_data_mux_pcaddr(t_pc_o_rs1_data_mux_pcaddr),
+    //.i_alu_o_Zero(t_alu_o_Zero), // Not required any more as AND is done in MEM Stage
+    .i_alu_o_Zero_clu_Branch_and(t_alu_o_Zero_clu_Branch_and), //  MEM_EX Reg ANDED output given to the Fetch
+    //.i_imm_o_immediate(t_immediate_out_data), // Removing Imm from fetch and keeping the addition in EX stage
+    .i_pc_o_rs1_data_mux_imm_add_data(t_pc_o_rs1_data_mux_imm_add_data), //T Connected it to EX/MEM Pipeline register out of the muxed and added data
+    //.i_pc_o_rs1_data_mux_pcaddr(t_pc_o_rs1_data_mux_pcaddr),
     .PC(PC_current_val),
     .o_pc_plus_4(t_pc_plus_4),
     .o_instr_mem_rd_addr(o_imem_raddr)
 );
 
-// ALU Control
-alu_control alu_control_inst( 
-    .i_clu_alu_op(t_clu_alu_op),
-    .i_instr_mem_inst(i_imem_rdata),
-    .o_alu_control_sel(o_alu_control_sel)
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////*IF_ID Pipeline Register Implementation*/////////////////////////////////////////////////////////////////////
+/////////////////////////////////////{ t_pc_plus_4[31:0], PC_current_val[31:0], i_imem_rdata[31:0]}///////////////////////////////////////////////////////
+/////////////////////////////////    { IF_ID[95:64],      IF_ID[63:32],         IF_ID[31:0]}//////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//TODO : Enable Clear and ready
+reg [95:0]IF_ID;
+wire [95:0]IF_ID_temp;
+assign IF_ID_temp = {t_pc_plus_4,PC_current_val,i_imem_rdata};
+always @ (posedge i_clk) begin
+    if (i_rst)
+            IF_ID <= 95'b0;
+    else begin
+            IF_ID <= IF_ID_temp;
+    end
+end
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+wire [31:0] t_i_imem_to_rf_instr;
+assign t_i_imem_to_rf_instr = IF_ID[31:0]; // The Pipelined instruction in the ID Stage
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+///////////////////////////////////////////////////////Register File Instance///////////////////////////////////////////////////////
+rf #(.BYPASS_EN(0)) rf(
+    .i_clk(i_clk),
+    .i_rst(i_rst),
+    .i_rs1_raddr(t_i_imem_to_rf_instr[19:15]), // Replaced it with the pipelined reg out instruction
+    .i_rs2_raddr(t_i_imem_to_rf_instr[24:20]), // Replaced it with the pipelined reg out instruction
+    .i_rd_waddr(t_i_rd_waddr), //Coming from MEM_WB Pipeline register
+    .i_rd_wen(t_i_rd_wen), //Has to come from the MEM_WB pipeline register
+    .i_rd_wdata(i_dmem_alu_muxout_data), // Coming from MEM_WB Pipeline register
+    .o_rs1_rdata(o_rs1_rdata),
+    .o_rs2_rdata(t_rs2_rdata) // This signal is going only to the Pipeline ID_EX
 );
 
-// ALU
-alu_wrapper alu_wrapper_inst(
-    .i_alu_ctrl_opsel(o_alu_control_sel),
-    .i_rf_op1(t_lui_auipc_mux_data), //replaced it with Muxed out data from the 4:1 mux
-    .i_rf_op2(rs2_rdata_imm_mux_data),
-    .i_clu_branch_instr_alu_sel(t_clu_branch_instr_alu_sel),
-    .o_alu_result(t_o_dmem_addr),
-    .o_alu_Zero(t_alu_o_Zero)
-);
-
-// Control Unit
+/////////////////////////////////////////////////////////Control Unit Instance///////////////////////////////////////////////////////
 control_unit control_unit_inst(
     .clk(i_clk),
     .rst_n(i_rst),
-    .i_clu_inst(i_imem_rdata),
-    .o_clu_Branch(i_clu_branch),
+    .i_clu_inst(t_i_imem_to_rf_instr), // Replaced it with the pipelined reg out instruction
+    .o_clu_Branch(t_clu_branch),
     .o_clu_halt(t_clu_halt),
     .o_clu_MemRead(t_dmem_ren),
     .o_clu_MemtoReg(t_clu_MemtoReg),
@@ -566,74 +551,315 @@ control_unit control_unit_inst(
     .o_sign_or_zero_ext_data_mux(t_sign_or_zero_ext_data_mux)
 );
 
-//  Muxes
-assign o_dmem_wen = t_dmem_wen;
-assign o_dmem_ren = t_dmem_ren;
-assign o_dmem_addr = (t_dmem_wen || t_dmem_ren) ? {t_o_dmem_addr[31:2],2'b0} : t_o_dmem_addr; //Only when w_en or ren is set we are to align the addresses
-assign i_dmem_alu_muxout_data                   =   t_clu_MemtoReg ? i_dmem_rdata_sign_or_zero_ext_mux_data : o_dmem_addr;
-assign rs2_rdata_imm_mux_data                   =   (t_clu_ALUSrc == 2'b00) ? 32'b0 : 
-                                                    (t_clu_ALUSrc == 2'b01) ? t_immediate_out_data :
-                                                    (t_clu_ALUSrc == 2'b10) ? t_rs2_rdata :
-                                                    t_rs2_rdata;
-assign t_lui_auipc_mux_data                     =   (t_clu_lui_auipc_mux_sel == 2'b00)? o_rs1_rdata :    //Default
-                                                    (t_clu_lui_auipc_mux_sel == 2'b01)? 32'b0 :          //LUI
-                                                    (t_clu_lui_auipc_mux_sel == 2'b10)? PC_current_val : //AUIPC
-                                                    (t_clu_lui_auipc_mux_sel == 2'b11)? t_pc_plus_4 :    //Jal, Jalr
-                                                    o_rs1_rdata;
-assign t_pc_o_rs1_data_mux_pcaddr                 = (t_clu_pc_o_rs1_data_mux_sel) ? (o_rs1_rdata) :  PC_current_val; // Select o_rs1_data for jalr instruction else retain pc        
+///////////////////////////////Immediate format decoding -- > Updated to do the Decoding in the ID stage ///////////////////////////////
+assign i_imm_format =   
+    (t_i_imem_to_rf_instr[6:0] == 7'b0110011)? 6'b000001 : // R
+    ((t_i_imem_to_rf_instr[6:0] == 7'b0010011)  || (t_i_imem_to_rf_instr[6:0] == 7'b1100111))? 6'b000010 : // I and Jalr
+    (t_i_imem_to_rf_instr[6:0] == 7'b0000011)? 6'b000010 : // I (Load)
+    (t_i_imem_to_rf_instr[6:0] == 7'b0100011)? 6'b000100 : // S
+    (t_i_imem_to_rf_instr[6:0] == 7'b1100011)? 6'b001000 : // B
+    ((t_i_imem_to_rf_instr[6:0] == 7'b0110111) || (t_i_imem_to_rf_instr[6:0] == 7'b0010111))? 6'b010000 : // U
+    (t_i_imem_to_rf_instr[6:0] == 7'b1101111)? 6'b100000 : // Jal
+    6'bXXXXXX;
 
-//MASK Implementation
-assign o_dmem_mask = t_dmem_mask;
+//////////////////////////////////////////////////////////Immediate Generator Instance////////////////////////////////////////////////////
+imm imm_decode_inst(
+    .i_inst(t_i_imem_to_rf_instr), // Replaced it with the pipelined reg out instruction
+    .i_format(i_imm_format),
+    .o_immediate(t_immediate_out_data)
+);
 
-assign t_dmem_mask =    ((t_clu_ld_st_type_sel == 3'b000) || (t_clu_ld_st_type_sel == 3'b011) || (t_clu_ld_st_type_sel == 3'b101)) ? ( // For lb, lbu, sb - BYTE
-                            (t_o_dmem_addr[1:0] == 2'b00) ? 4'b0001 : // Eg. 2000
-                            (t_o_dmem_addr[1:0] == 2'b01) ? 4'b0010 : // Eg. 2001
-                            (t_o_dmem_addr[1:0] == 2'b10) ? 4'b0100 : // Eg. 2002
-                            (t_o_dmem_addr[1:0] == 2'b11) ? 4'b1000 : // Eg. 2003
+///#################################################################################################################################################################################
+////////////////#######################################*ID_EX Pipeline Register Implementation*#######################################//////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////Assigning a 20 bit Wire to group all the Control Signal together for pipelining///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//{ID_EX[195], ID_EX[194],                 ID_EX[193], ID_EX[192], ID_EX[191:189],            ID_EX[188:186],                   ID_EX[185],     ID_EX[184],   ID_EX[183:182],                  ID_EX[181:180],    ID_EX[179:178],    ID_EX[177:176]||||/////////////
+//{t_rd_wen,   t_clu_pc_o_rs1_data_mux_sel,t_dmem_wen, t_dmem_ren, t_clu_ld_st_type_sel[2:0], t_sign_or_zero_ext_data_mux[2:0], t_clu_MemtoReg, t_clu_branch, t_clu_branch_instr_alu_sel[1:0], t_clu_alu_op[1:0], t_clu_ALUSrc[1:0], t_clu_lui_auipc_mux_sel[1:0]}//
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+wire [19:0] Control_input_ID_EX;
+assign Control_input_ID_EX = {t_rd_wen,t_clu_pc_o_rs1_data_mux_sel,t_dmem_wen,t_dmem_ren,t_clu_ld_st_type_sel[2:0],t_sign_or_zero_ext_data_mux[2:0],t_clu_MemtoReg,
+                             t_clu_branch,t_clu_branch_instr_alu_sel[1:0],t_clu_alu_op[1:0],t_clu_ALUSrc[1:0],t_clu_lui_auipc_mux_sel[1:0]};
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////{ID_EX[195:176],        ID_EX[175:144], ID_EX[143:112], ID_EX[111:80],      ID_EX[79:48],      ID_EX[47:41], ID_EX[40:38], ID_EX[37],    ID_EX[36:5],           ID_EX[4:0]};///////////
+///      {Control Signals[20:0], PC+4,           PC,             o_rs1_rdata[31:0],  t_rs2_rdata[31:0], func7,        func3,        opcode5thbit, t_immediate_out_data,  wr_addr[4:0]}//////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+reg [195:0]ID_EX;
+wire [195:0]ID_EX_temp;
+assign ID_EX_temp = {Control_input_ID_EX[19:0],IF_ID[95:64],IF_ID[63:32],o_rs1_rdata[31:0],t_rs2_rdata[31:0],IF_ID[31:25],IF_ID[14:12],IF_ID[5],t_immediate_out_data[31:0],IF_ID[11:7]};
+always @ (posedge i_clk) begin
+    if (i_rst)
+            ID_EX <= 196'b0;
+    else begin
+            ID_EX <= ID_EX_temp;
+    end
+end
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////MUXES in  the EX Stage//////////////////////////////////////////////////////
+// TODO : ALL THE MUX INPUTS ARE NOT UPDATED!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+assign rs2_rdata_imm_mux_data       = (ID_EX[179:178] == 2'b00) ? 32'b0 : 
+                                      (ID_EX[179:178] == 2'b01) ? ID_EX[36:5]  : // t_immediate_out_data - Updated to Reg Data from Pipileine ID_EX
+                                      (ID_EX[179:178] == 2'b10) ? ID_EX[79:48] : // t_rs2_rdata          - Updated to Reg Data from Pipileine ID_EX
+                                       ID_EX[79:48];                             // t_rs2_rdata          - Updated to Reg Data from Pipileine ID_EX
+
+assign t_lui_auipc_mux_data         = (ID_EX[177:176] == 2'b00)? ID_EX[111:80] :  //Default      //o_rs1_rdata     Updated to Reg Data from Pipileine ID_EX
+                                      (ID_EX[177:176] == 2'b01)? 32'b0 :          //LUI     
+                                      (ID_EX[177:176] == 2'b10)? ID_EX[143:112] : //AUIPC        //PC_current_val  Updated to Reg Data from Pipileine ID_EX
+                                      (ID_EX[177:176] == 2'b11)? ID_EX[175:144] : //Jal, Jalr    //t_pc_plus_4     Updated to Reg Data from Pipileine ID_EX
+                                      ID_EX[111:80];                                                      //o_rs1_rdata     Updated to Reg Data from Pipileine ID_EX    
+
+assign t_pc_o_rs1_data_mux_pcaddr   = (ID_EX[194]) ? (ID_EX[111:80]) :                                                        // o_rs1_rdata Updated to Reg Data from Pipeline ID_EX
+                                       ID_EX[143:112];                                // Select o_rs1_data for jalr instruction else retain pc //PC_current_val  Updated to Reg Data from Pipeline ID_EX     
+
+assign t_pc_o_rs1_data_mux_imm_add_EX_stage_data = t_pc_o_rs1_data_mux_pcaddr + t_immediate_out_data; //Connected to the MEM_EX Pipeline
+
+///////////////////////////////////////////ALU Control Instance///////////////////////////////////////// 
+alu_control alu_control_inst( 
+    //.i_clu_alu_op(t_clu_alu_op), //Updated it to the Pipeline input
+    .i_clu_alu_op(ID_EX[181:180]), // t_clu_alu_op
+    //.i_instr_mem_inst(i_imem_rdata), //Removed as we dont have to sent the full instruction to the ALU control    
+    .funct3(ID_EX[40:38]), // funct3 coming from the ID_EX Pipeline register
+    .funct7(ID_EX[47:41]), // funct7 coming from the ID_EX Pipeline register
+    .opcode_5thbit_add_sub(ID_EX[37]), // opcode5thbit coming from the ID_EX Pipeline register
+    .o_alu_control_sel(o_alu_control_sel)
+);
+////////////////////////////////////////ALU Wrapper Instance/////////////////////////////////////////
+alu_wrapper alu_wrapper_inst(
+    .i_alu_ctrl_opsel(o_alu_control_sel),
+    .i_rf_op1(t_lui_auipc_mux_data), //replaced it with Muxed out data from the 4:1 mux
+    .i_rf_op2(rs2_rdata_imm_mux_data),
+    //.i_clu_branch_instr_alu_sel(t_clu_branch_instr_alu_sel),
+    .i_clu_branch_instr_alu_sel(ID_EX[183:182]), //t_clu_branch_instr_alu_sel
+    //.o_alu_result(t_o_dmem_addr), 
+    .o_alu_result(t_o_alu_result), //Redefined a new temp wire for connecting it to MEM_EX pipeline below
+    .o_alu_Zero(t_alu_o_Zero) // Being sent to the MEM_EX Pipeline
+);
+//////////////////////////////////Mask Generation in the EX Stage/////////////////////////////////////
+assign t_dmem_mask =    ((ID_EX[191:189] == 3'b000) || (ID_EX[191:189] == 3'b011) || (ID_EX[191:189] == 3'b101)) ? ( // For lb, lbu, sb - BYTE
+                            (t_o_alu_result[1:0] == 2'b00) ? 4'b0001 : // Eg. 2000
+                            (t_o_alu_result[1:0] == 2'b01) ? 4'b0010 : // Eg. 2001
+                            (t_o_alu_result[1:0] == 2'b10) ? 4'b0100 : // Eg. 2002
+                            (t_o_alu_result[1:0] == 2'b11) ? 4'b1000 : // Eg. 2003
                             4'bxxxx)
                         :
-                        ((t_clu_ld_st_type_sel == 3'b001) || (t_clu_ld_st_type_sel == 3'b100) || (t_clu_ld_st_type_sel == 3'b110)) ? ( // For lh, lhu, sh - HALF
-                            (t_o_dmem_addr[1:0] == 2'b00) ? 4'b0011 : // Eg. 2000
-                            // (t_o_dmem_addr[1:0] == 2'b01) Eg. 2001 - Not a valid case for half
-                            (t_o_dmem_addr[1:0] == 2'b10) ? 4'b1100 : // Eg. 2002
-                            // (t_o_dmem_addr[1:0] == 2'b11) Eg. 2003 - Not a valid case for half
+                        ((ID_EX[191:189] == 3'b001) || (ID_EX[191:189] == 3'b100) || (ID_EX[191:189] == 3'b110)) ? ( // For lh, lhu, sh - HALF
+                            (t_o_alu_result[1:0] == 2'b00) ? 4'b0011 : // Eg. 2000
+                            // (t_o_alu_result[1:0] == 2'b01) Eg. 2001 - Not a valid case for half
+                            (t_o_alu_result[1:0] == 2'b10) ? 4'b1100 : // Eg. 2002
+                            // (t_o_alu_result[1:0] == 2'b11) Eg. 2003 - Not a valid case for half
                             4'bxxxx)
                         :
                         4'b1111;                      
 
+/////////////#######################################*#####################################################################################################################////////
+/////////////#######################################*EX_MEM Pipeline Register Implementation*#######################################//////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////
+/////Assigning a 5 bit Wire to group all the Control Signal together for EX_MEM pipeline/////////
+//////////{ t_sign_or_zero_ext_data_mux[2:0], t_rd_wen,    t_dmem_wen,  t_dmem_ren,  t_clu_MemtoReg, t_clu_branch}///////////////////
+//////////{ EX_MEM[113:111],                  EX_MEM[110], EX_MEM[109], EX_MEM[108], EX_MEM[107],    EX_MEM[106]  }///////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////
+wire [7:0] Control_input_EX_MEM;
+assign Control_input_EX_MEM = {ID_EX[188:186],ID_EX[195],ID_EX[193],ID_EX[192],ID_EX[185],ID_EX[184]}; // Mapped to the Signals as above description
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////|||{EX_MEM[113:106],             EX_MEM[105:74],                                EX_MEM[73],    EX_MEM[72:69],            EX_MEM[68:37],         EX_MEM[36:5],       EX_MEM[4:0]}|||||///
+///      |||{Control_input_EX_MEM[7:0], t_pc_o_rs1_data_mux_imm_add_EX_stage_data[31:0], t_alu_o_Zero , t_dmem_mask[3:0]          t_o_alu_result[31:0],  t_rs2_rdata[31:0],  wr_addr[4:0]|||||///
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+reg [113:0]EX_MEM;
+wire [113:0]EX_MEM_temp;
+assign EX_MEM_temp = {Control_input_EX_MEM[7:0],t_pc_o_rs1_data_mux_imm_add_EX_stage_data[31:0],t_alu_o_Zero,t_dmem_mask[3:0],t_o_alu_result[31:0],ID_EX[79:48],ID_EX[4:0]};
+always @ (posedge i_clk) begin
+    if (i_rst)
+            EX_MEM <= 114'b0;
+    else begin
+            EX_MEM <= EX_MEM_temp;
+    end
+end
+////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////AND Logic implemented in MEM Stage/////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+assign  t_alu_o_Zero_clu_Branch_and = EX_MEM[73] & EX_MEM[106]; // AND of t_clu_branch and t_alu_o_Zero
+////////////////////////////////////////////////////////////////////////////////////////////////
+assign t_pc_o_rs1_data_mux_imm_add_data =  EX_MEM[105:74]; // The PC + imm value executed in EX is Pipelined to MEM and is now being sent to Fetch (For Branch and Jumps)
+////////////////////////////////////////////////////////////////////////////////////////////////
+///////////Muxes - Changing the assignments to receive the data from MEM_EX pipeline///////////
+assign o_dmem_wen = EX_MEM[109];
+assign o_dmem_ren = EX_MEM[108];
+assign o_dmem_addr = (EX_MEM[109] || EX_MEM[108]) ? {EX_MEM[68:39],2'b0} : EX_MEM[68:37]; //Only when w_en or ren is set we are to align the addresses //TODO : NEEDS an UPDATE with the MEM_EX  Pipleined out
+
 // For Load instructions only
-assign  i_dmem_rdata_sign_or_zero_ext_mux_data  =   (t_dmem_mask == 4'b0001) && (t_sign_or_zero_ext_data_mux == 3'b001) ?  {{24{i_dmem_rdata[7]}},i_dmem_rdata[7:0]}         :   // lb and MASK = 4'b0001
-                                                    (t_dmem_mask == 4'b0001) && (t_sign_or_zero_ext_data_mux == 3'b000) ?  {24'b0,i_dmem_rdata[7:0]}                         :   // lbu and MASK = 4'b0001
-                                                    (t_dmem_mask == 4'b0010) && (t_sign_or_zero_ext_data_mux == 3'b001) ?  {{16{i_dmem_rdata[15]}},i_dmem_rdata[15:8],8'b0}  :   // lb and MASK = 4'b0010 - sign ext
-                                                    (t_dmem_mask == 4'b0010) && (t_sign_or_zero_ext_data_mux == 3'b000) ?  {16'b0,i_dmem_rdata[15:8],8'b0}                   :   // lbu and MASK = 4'b0010
-                                                    (t_dmem_mask == 4'b0100) && (t_sign_or_zero_ext_data_mux == 3'b001) ?  {{8{i_dmem_rdata[23]}},i_dmem_rdata[23:16],16'b0} :   // lb and MASK = 4'b0100 - sign ext
-                                                    (t_dmem_mask == 4'b0100) && (t_sign_or_zero_ext_data_mux == 3'b000) ?  {8'b0,i_dmem_rdata[23:16],16'b0}                  :   // lbu and MASK = 4'b0100
-                                                    (t_dmem_mask == 4'b1000) && (t_sign_or_zero_ext_data_mux == 3'b001) ?  {i_dmem_rdata[31:24],24'b0}                       :   // lb and MASK = 4'b1000
-                                                    (t_dmem_mask == 4'b1000) && (t_sign_or_zero_ext_data_mux == 3'b000) ?  {i_dmem_rdata[31:24],24'b0}                       :   // lbu and MASK = 4'b1000
-                                                    (t_dmem_mask == 4'b0011) && (t_sign_or_zero_ext_data_mux == 3'b011) ?  {{16{i_dmem_rdata[15]}},i_dmem_rdata[15:0]}       :   // lh and MASK = 4'b0011
-                                                    (t_dmem_mask == 4'b0011) && (t_sign_or_zero_ext_data_mux == 3'b010) ?  {16'b0,i_dmem_rdata[15:0]}                        :   // lhu and MASK = 4'b0011
-                                                    (t_dmem_mask == 4'b1100) && (t_sign_or_zero_ext_data_mux == 3'b011) ?  {{16{i_dmem_rdata[31]}},i_dmem_rdata[31:16]}      :   // lh and MASK = 4'b1100
-                                                    (t_dmem_mask == 4'b1100) && (t_sign_or_zero_ext_data_mux == 3'b010) ?  {16'b0,i_dmem_rdata[31:16]}                       :   // lhu and MASK = 4'b1100
-                                                    (t_dmem_mask == 4'b1111) && (t_sign_or_zero_ext_data_mux == 3'b100) ?  i_dmem_rdata                                      :   // lw and MASK = 4'b1111
+assign  i_dmem_rdata_sign_or_zero_ext_mux_data  =   (EX_MEM[72:69] == 4'b0001) && (EX_MEM[113:111] == 3'b001) ?  {{24{i_dmem_rdata[7]}},i_dmem_rdata[7:0]}         :   // lb and MASK = 4'b0001
+                                                    (EX_MEM[72:69] == 4'b0001) && (EX_MEM[113:111] == 3'b000) ?  {24'b0,i_dmem_rdata[7:0]}                         :   // lbu and MASK = 4'b0001
+                                                    (EX_MEM[72:69] == 4'b0010) && (EX_MEM[113:111] == 3'b001) ?  {{16{i_dmem_rdata[15]}},i_dmem_rdata[15:8],8'b0}  :   // lb and MASK = 4'b0010 - sign ext
+                                                    (EX_MEM[72:69] == 4'b0010) && (EX_MEM[113:111] == 3'b000) ?  {16'b0,i_dmem_rdata[15:8],8'b0}                   :   // lbu and MASK = 4'b0010
+                                                    (EX_MEM[72:69] == 4'b0100) && (EX_MEM[113:111] == 3'b001) ?  {{8{i_dmem_rdata[23]}},i_dmem_rdata[23:16],16'b0} :   // lb and MASK = 4'b0100 - sign ext
+                                                    (EX_MEM[72:69] == 4'b0100) && (EX_MEM[113:111] == 3'b000) ?  {8'b0,i_dmem_rdata[23:16],16'b0}                  :   // lbu and MASK = 4'b0100
+                                                    (EX_MEM[72:69] == 4'b1000) && (EX_MEM[113:111] == 3'b001) ?  {i_dmem_rdata[31:24],24'b0}                       :   // lb and MASK = 4'b1000
+                                                    (EX_MEM[72:69] == 4'b1000) && (EX_MEM[113:111] == 3'b000) ?  {i_dmem_rdata[31:24],24'b0}                       :   // lbu and MASK = 4'b1000
+                                                    (EX_MEM[72:69] == 4'b0011) && (EX_MEM[113:111] == 3'b011) ?  {{16{i_dmem_rdata[15]}},i_dmem_rdata[15:0]}       :   // lh and MASK = 4'b0011
+                                                    (EX_MEM[72:69] == 4'b0011) && (EX_MEM[113:111] == 3'b010) ?  {16'b0,i_dmem_rdata[15:0]}                        :   // lhu and MASK = 4'b0011
+                                                    (EX_MEM[72:69] == 4'b1100) && (EX_MEM[113:111] == 3'b011) ?  {{16{i_dmem_rdata[31]}},i_dmem_rdata[31:16]}      :   // lh and MASK = 4'b1100
+                                                    (EX_MEM[72:69] == 4'b1100) && (EX_MEM[113:111] == 3'b010) ?  {16'b0,i_dmem_rdata[31:16]}                       :   // lhu and MASK = 4'b1100
+                                                    (EX_MEM[72:69] == 4'b1111) && (EX_MEM[113:111] == 3'b100) ?  i_dmem_rdata                                      :   // lw and MASK = 4'b1111
                                                                                 i_dmem_rdata ;
  
+assign f_rs2_rdata  = EX_MEM[36:5]; // The Pipelined o_rs2_data coming from REG for STORE instruction
 // For store instructions only 
-// Do we need any sign extension or zero extension for this data to be written? - NEED TO DO
-// Dont we have to maintain the value of the other bytes than the byte that we are writting to in the memory
-assign o_dmem_wdata =   (t_dmem_mask == 4'b0001) ? {{24{t_rs2_rdata[7]}},t_rs2_rdata[7:0]} :                   // Applicable for sb
-                        (t_dmem_mask == 4'b0010) ? {{16{t_rs2_rdata[15]}},t_rs2_rdata[15:8],8'b0} :             // Applicable for sb
-                        (t_dmem_mask == 4'b0100) ? {{8{t_rs2_rdata[23]}},t_rs2_rdata[23:16],16'b0} :            // Applicable for sb
-                        (t_dmem_mask == 4'b1000) ? {t_rs2_rdata[7:0],24'b0} :                   // Applicable for sb
-                        (t_dmem_mask == 4'b0011) ? {{16{t_rs2_rdata[15]}},t_rs2_rdata[15:0]} :  // Applicable for sh - SIGN EXTENSION by default
-                        (t_dmem_mask == 4'b1100) ? {t_rs2_rdata[15:0],16'b0} :                  // Applicable for sh
-                        (t_dmem_mask == 4'b1111) ? t_rs2_rdata :  
+assign o_dmem_wdata =   (EX_MEM[72:69] == 4'b0001) ? {{24{f_rs2_rdata[7]}},f_rs2_rdata[7:0]} :                   // Applicable for sb
+                        (EX_MEM[72:69] == 4'b0010) ? {{16{f_rs2_rdata[15]}},f_rs2_rdata[15:8],8'b0} :             // Applicable for sb
+                        (EX_MEM[72:69] == 4'b0100) ? {{8{f_rs2_rdata[23]}},f_rs2_rdata[23:16],16'b0} :            // Applicable for sb
+                        (EX_MEM[72:69] == 4'b1000) ? {f_rs2_rdata[7:0],24'b0} :                   // Applicable for sb
+                        (EX_MEM[72:69] == 4'b0011) ? {{16{f_rs2_rdata[15]}},f_rs2_rdata[15:0]} :  // Applicable for sh - SIGN EXTENSION by default
+                        (EX_MEM[72:69] == 4'b1100) ? {f_rs2_rdata[15:0],16'b0} :                  // Applicable for sh
+                        (EX_MEM[72:69] == 4'b1111) ? f_rs2_rdata :  
                         32'bxxxx;                                                               // Default case
+
+//MASK Implementation
+assign o_dmem_mask = EX_MEM[72:69]; // Changed it to value coming from MEM_EX Pipeline - t_dmem_mask
+
+/////////############################################################################################################################################################////////
+////////////#######################################*MEM_WB Pipeline Register Implementation*#######################################//////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////
+/////Assigning a 2 bit Wire to group all the Control Signal together for MEM_WB pipeline/////////
+//////////{      t_rd_wen,         t_clu_MemtoReg  }/////////////////////////////////////////////
+//////////{ (MEM_WB[70]/EX_MEM[110], MEM_WB[69]/EX_MEM[107]) }/////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////
+wire [1:0] Control_input_MEM_WB;
+assign Control_input_MEM_WB = {EX_MEM[110],EX_MEM[107]}; // Mapped to the Signals as in above description
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////|||{MEM_WB[70:69],              MEM_WB[68:37],                                   MEM_WB[36:5],                      ,        MEM_WB[4:0]}|||||//////////////////
+///      |||{Control_input_MEM_WB[1:0],  i_dmem_rdata_sign_or_zero_ext_mux_data[31:0]    (EX_MEM[68:37]/t_o_alu_result[31:0]),  (EX_MEM[4:0]/wr_addr[4:0])|||||//////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+reg [70:0]MEM_WB;
+wire [70:0]MEM_WB_temp;
+assign MEM_WB_temp = {Control_input_MEM_WB[1:0],i_dmem_rdata_sign_or_zero_ext_mux_data[31:0],EX_MEM[68:37],EX_MEM[4:0]};
+always @ (posedge i_clk) begin
+    if (i_rst)
+            MEM_WB <= 71'b0;
+    else begin
+            MEM_WB <= MEM_WB_temp;
+    end
+end
+/////////////////THIS WILL BE IN THE LAST STAGE OF THE PIPELINE///////////////////////////
+assign i_dmem_alu_muxout_data                     =    MEM_WB[69] ? MEM_WB[68:37] : MEM_WB[36:5]; // The Data going to be written to the Register - Either the Alu result or Data Read from Memory in case of Load instruction
+assign t_i_rd_waddr                               =    MEM_WB[4:0]; // Pipeline Register Write Address (Source Instruction)
+assign t_i_rd_wen                                 =    MEM_WB[70]; // Pipelined Register Write Enable  (Source Control Unit)
+////////////////////////////////////////////////////////////////////////////////////////////////
 
 endmodule
 
 
-// To - do's
-// Trap signal implementation
-// Valid signal implementation
-// Review architecture with George
-// Review verilog with Eric
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+//assign t_pc_o_rs1_data_mux_pcaddr = (t_clu_pc_o_rs1_data_mux_sel) ? (o_rs1_rdata) :  PC_current_val; // Select o_rs1_data for jalr instruction else retain pc        
+// assign rs2_rdata_imm_mux_data       = (t_clu_ALUSrc == 2'b00) ? 32'b0 : 
+//                                       (t_clu_ALUSrc == 2'b01) ? ID_EX[36:5]  : // t_immediate_out_data - Updated to Reg Data from Pipileine ID_EX
+//                                       (t_clu_ALUSrc == 2'b10) ? ID_EX[79:48] : // t_rs2_rdata          - Updated to Reg Data from Pipileine ID_EX
+//                                        ID_EX[79:48];                           // t_rs2_rdata          - Updated to Reg Data from Pipileine ID_EX
+
+// assign t_lui_auipc_mux_data         = (t_clu_lui_auipc_mux_sel == 2'b00)? ID_EX[111:80] :  //Default      //o_rs1_rdata     Updated to Reg Data from Pipileine ID_EX
+//                                       (t_clu_lui_auipc_mux_sel == 2'b01)? 32'b0 :          //LUI     
+//                                       (t_clu_lui_auipc_mux_sel == 2'b10)? ID_EX[143:112] : //AUIPC        //PC_current_val  Updated to Reg Data from Pipileine ID_EX
+//                                       (t_clu_lui_auipc_mux_sel == 2'b11)? ID_EX[175:144] : //Jal, Jalr    //t_pc_plus_4     Updated to Reg Data from Pipileine ID_EX
+//                                       ID_EX[111:80];                                                      //o_rs1_rdata     Updated to Reg Data from Pipileine ID_EX    
+
+// assign t_pc_o_rs1_data_mux_pcaddr   = (t_clu_pc_o_rs1_data_mux_sel) ? (ID_EX[111:80]) :                                                        // o_rs1_rdata Updated to Reg Data from Pipeline ID_EX
+//                                        ID_EX[143:112];                                // Select o_rs1_data for jalr instruction else retain pc //PC_current_val  Updated to Reg Data from Pipeline ID_EX     
+
+
+
+// assign t_dmem_mask =    ((t_clu_ld_st_type_sel == 3'b000) || (t_clu_ld_st_type_sel == 3'b011) || (t_clu_ld_st_type_sel == 3'b101)) ? ( // For lb, lbu, sb - BYTE
+//                             (t_o_dmem_addr[1:0] == 2'b00) ? 4'b0001 : // Eg. 2000
+//                             (t_o_dmem_addr[1:0] == 2'b01) ? 4'b0010 : // Eg. 2001
+//                             (t_o_dmem_addr[1:0] == 2'b10) ? 4'b0100 : // Eg. 2002
+//                             (t_o_dmem_addr[1:0] == 2'b11) ? 4'b1000 : // Eg. 2003
+//                             4'bxxxx)
+//                         :
+//                         ((t_clu_ld_st_type_sel == 3'b001) || (t_clu_ld_st_type_sel == 3'b100) || (t_clu_ld_st_type_sel == 3'b110)) ? ( // For lh, lhu, sh - HALF
+//                             (t_o_dmem_addr[1:0] == 2'b00) ? 4'b0011 : // Eg. 2000
+//                             // (t_o_dmem_addr[1:0] == 2'b01) Eg. 2001 - Not a valid case for half
+//                             (t_o_dmem_addr[1:0] == 2'b10) ? 4'b1100 : // Eg. 2002
+//                             // (t_o_dmem_addr[1:0] == 2'b11) Eg. 2003 - Not a valid case for half
+//                             4'bxxxx)
+//                         :
+//                         4'b1111;    
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+// //  Muxes
+// assign o_dmem_wen = t_dmem_wen;
+// assign o_dmem_ren = t_dmem_ren;
+// assign o_dmem_addr = (t_dmem_wen || t_dmem_ren) ? {t_o_dmem_addr[31:2],2'b0} : t_o_dmem_addr; //Only when w_en or ren is set we are to align the addresses //TODO : NEEDS an UPDATE with the MEM_EX  Pipleined out
+// assign i_dmem_alu_muxout_data                   =   t_clu_MemtoReg ? i_dmem_rdata_sign_or_zero_ext_mux_data : o_dmem_addr;
+
+// // For Load instructions only
+// assign  i_dmem_rdata_sign_or_zero_ext_mux_data  =   (t_dmem_mask == 4'b0001) && (t_sign_or_zero_ext_data_mux == 3'b001) ?  {{24{i_dmem_rdata[7]}},i_dmem_rdata[7:0]}         :   // lb and MASK = 4'b0001
+//                                                     (t_dmem_mask == 4'b0001) && (t_sign_or_zero_ext_data_mux == 3'b000) ?  {24'b0,i_dmem_rdata[7:0]}                         :   // lbu and MASK = 4'b0001
+//                                                     (t_dmem_mask == 4'b0010) && (t_sign_or_zero_ext_data_mux == 3'b001) ?  {{16{i_dmem_rdata[15]}},i_dmem_rdata[15:8],8'b0}  :   // lb and MASK = 4'b0010 - sign ext
+//                                                     (t_dmem_mask == 4'b0010) && (t_sign_or_zero_ext_data_mux == 3'b000) ?  {16'b0,i_dmem_rdata[15:8],8'b0}                   :   // lbu and MASK = 4'b0010
+//                                                     (t_dmem_mask == 4'b0100) && (t_sign_or_zero_ext_data_mux == 3'b001) ?  {{8{i_dmem_rdata[23]}},i_dmem_rdata[23:16],16'b0} :   // lb and MASK = 4'b0100 - sign ext
+//                                                     (t_dmem_mask == 4'b0100) && (t_sign_or_zero_ext_data_mux == 3'b000) ?  {8'b0,i_dmem_rdata[23:16],16'b0}                  :   // lbu and MASK = 4'b0100
+//                                                     (t_dmem_mask == 4'b1000) && (t_sign_or_zero_ext_data_mux == 3'b001) ?  {i_dmem_rdata[31:24],24'b0}                       :   // lb and MASK = 4'b1000
+//                                                     (t_dmem_mask == 4'b1000) && (t_sign_or_zero_ext_data_mux == 3'b000) ?  {i_dmem_rdata[31:24],24'b0}                       :   // lbu and MASK = 4'b1000
+//                                                     (t_dmem_mask == 4'b0011) && (t_sign_or_zero_ext_data_mux == 3'b011) ?  {{16{i_dmem_rdata[15]}},i_dmem_rdata[15:0]}       :   // lh and MASK = 4'b0011
+//                                                     (t_dmem_mask == 4'b0011) && (t_sign_or_zero_ext_data_mux == 3'b010) ?  {16'b0,i_dmem_rdata[15:0]}                        :   // lhu and MASK = 4'b0011
+//                                                     (t_dmem_mask == 4'b1100) && (t_sign_or_zero_ext_data_mux == 3'b011) ?  {{16{i_dmem_rdata[31]}},i_dmem_rdata[31:16]}      :   // lh and MASK = 4'b1100
+//                                                     (t_dmem_mask == 4'b1100) && (t_sign_or_zero_ext_data_mux == 3'b010) ?  {16'b0,i_dmem_rdata[31:16]}                       :   // lhu and MASK = 4'b1100
+//                                                     (t_dmem_mask == 4'b1111) && (t_sign_or_zero_ext_data_mux == 3'b100) ?  i_dmem_rdata                                      :   // lw and MASK = 4'b1111
+//                                                                                 i_dmem_rdata ;
+ 
+// // For store instructions only 
+// assign o_dmem_wdata =   (t_dmem_mask == 4'b0001) ? {{24{t_rs2_rdata[7]}},t_rs2_rdata[7:0]} :                   // Applicable for sb
+//                         (t_dmem_mask == 4'b0010) ? {{16{t_rs2_rdata[15]}},t_rs2_rdata[15:8],8'b0} :             // Applicable for sb
+//                         (t_dmem_mask == 4'b0100) ? {{8{t_rs2_rdata[23]}},t_rs2_rdata[23:16],16'b0} :            // Applicable for sb
+//                         (t_dmem_mask == 4'b1000) ? {t_rs2_rdata[7:0],24'b0} :                   // Applicable for sb
+//                         (t_dmem_mask == 4'b0011) ? {{16{t_rs2_rdata[15]}},t_rs2_rdata[15:0]} :  // Applicable for sh - SIGN EXTENSION by default
+//                         (t_dmem_mask == 4'b1100) ? {t_rs2_rdata[15:0],16'b0} :                  // Applicable for sh
+//                         (t_dmem_mask == 4'b1111) ? t_rs2_rdata :  
+//                         32'bxxxx;                                                               // Default case
+
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+//assign o_dmem_mask = t_dmem_mask; // This should be a coming out of the MEM_EX Pipeline
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+//assign i_dmem_alu_muxout_data                   =   t_clu_MemtoReg ? i_dmem_rdata_sign_or_zero_ext_mux_data : o_dmem_addr;

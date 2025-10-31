@@ -17,3 +17,11 @@
 //What Does ALU control do? If its output is 4 bit then why dont we have a 4bit input to the ALU?
 //[Q] DO we have Zero and Overflow as output in ALU?
 // [Q] Both in case of o_slt and o_eq is it expected to be connected to Zero output?
+
+
+////Project Phase 5
+
+1. What should be the values of the register fields which are not being assigned in the next clock?
+2. For nop implementation - Do we have to retain the reg value as it is or do we have to propogate something? (To retain the reg value we can just freeze the reg)
+3. New OPCODE check for nop has to be implemented in MCU.
+4. How about I still keep an enable for a single cycle processor? A register Bypass signal?
